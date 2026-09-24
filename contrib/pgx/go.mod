@@ -3,7 +3,7 @@ module github.com/TosmimForidMehtab/torge/contrib/pgx
 go 1.25.0
 
 require (
-	github.com/TosmimForidMehtab/torge v0.0.0-00010101000000-000000000000
+	github.com/TosmimForidMehtab/torge v0.1.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 
@@ -15,5 +15,3 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
-
-replace github.com/TosmimForidMehtab/torge => ../..

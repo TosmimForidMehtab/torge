@@ -2,7 +2,7 @@ module github.com/TosmimForidMehtab/torge/contrib/mongo
 
 go 1.25.0
 
-require github.com/TosmimForidMehtab/torge v0.0.0-00010101000000-000000000000
+require github.com/TosmimForidMehtab/torge v0.1.0
 
 require (
 	github.com/klauspost/compress v1.19.2 // indirect
@@ -15,5 +15,3 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 )
-
-replace github.com/TosmimForidMehtab/torge => ../..
