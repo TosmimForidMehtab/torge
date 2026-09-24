@@ -1,0 +1,13 @@
+go 1.25.0
+
+use (
+	.
+	./benchmarks
+	./contrib/jwt
+	./contrib/mongo
+	./contrib/otel
+	./contrib/pgx
+	./contrib/redis
+	./contrib/tests
+	./examples
+)

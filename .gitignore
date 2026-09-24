@@ -1,0 +1,41 @@
+# Binaries and build output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+/torge
+
+# Test binaries, coverage and profiles
+*.test
+*.out
+*.prof
+*.pprof
+coverage.*
+*.coverprofile
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependency directories
+vendor/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+.tmp/
+REQUIREMENTS.md
