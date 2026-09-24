@@ -1,5 +1,8 @@
 # Torge
 
+[![CI](https://github.com/TosmimForidMehtab/torge/actions/workflows/ci.yml/badge.svg)](https://github.com/TosmimForidMehtab/torge/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/TosmimForidMehtab/torge.svg)](https://pkg.go.dev/github.com/TosmimForidMehtab/torge)
+
 A batteries-included backend framework for Go that makes serious backend
 development coherent **without hiding Go**. Handlers still see
 `context.Context`, `error`, `*http.Request` and `http.ResponseWriter`; the

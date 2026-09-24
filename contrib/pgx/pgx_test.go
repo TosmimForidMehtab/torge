@@ -38,21 +38,44 @@ func TestTransactions(t *testing.T) {
 	if err := db.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Conn(ctx).Exec(ctx, `CREATE TEMP TABLE IF NOT EXISTS torge_t (v int)`); err != nil {
-		t.Fatal(err)
+	// A regular table, because a temporary one is visible only to the pool
+	// connection that created it.
+	for _, stmt := range []string{`DROP TABLE IF EXISTS torge_tx_test`, `CREATE TABLE torge_tx_test (v int)`} {
+		if _, err := db.Conn(ctx).Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
 	}
+	t.Cleanup(func() { _, _ = db.Conn(ctx).Exec(ctx, `DROP TABLE IF EXISTS torge_tx_test`) })
+	count := func() int {
+		var n int
+		if err := db.Conn(ctx).QueryRow(ctx, `SELECT count(*) FROM torge_tx_test`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
 	boom := errors.New("boom")
 	err = db.Transaction(ctx, func(ctx context.Context) error {
-		if _, err := db.Conn(ctx).Exec(ctx, `INSERT INTO torge_t VALUES (1)`); err != nil {
+		if _, err := db.Conn(ctx).Exec(ctx, `INSERT INTO torge_tx_test VALUES (1)`); err != nil {
 			return err
 		}
 		return boom
 	})
-	if !errors.Is(err, boom) {
-		t.Fatal(err)
+	if !errors.Is(err, boom) || count() != 0 {
+		t.Fatalf("rollback: err=%v rows=%d", err, count())
 	}
-	var n int
-	if err := db.Conn(ctx).QueryRow(ctx, `SELECT count(*) FROM torge_t`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("rollback failed: n=%d err=%v", n, err)
+
+	err = db.Transaction(ctx, func(ctx context.Context) error {
+		if _, err := db.Conn(ctx).Exec(ctx, `INSERT INTO torge_tx_test VALUES (2)`); err != nil {
+			return err
+		}
+		// A nested call joins the outer transaction.
+		return db.Transaction(ctx, func(ctx context.Context) error {
+			_, err := db.Conn(ctx).Exec(ctx, `INSERT INTO torge_tx_test VALUES (3)`)
+			return err
+		})
+	})
+	if err != nil || count() != 2 {
+		t.Fatalf("commit: err=%v rows=%d", err, count())
 	}
 }

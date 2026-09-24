@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt -w:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go.mod and go.sum are tidy
+        run: |
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "::group::$dir"
+            (cd "$dir" && GOWORK=off go mod tidy -diff)
+            echo "::endgroup::"
+          done
+
+      - name: Build published contrib modules against their declared core version
+        run: |
+          for m in jwt mongo otel pgx redis; do
+            (cd "contrib/$m" && GOWORK=off go build ./...)
+          done
+
+      - name: go vet
+        run: |
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            (cd "$dir" && go vet ./...)
+          done
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            (cd "$dir" && staticcheck ./...)
+          done
+
+      - name: Benchmarks compile and run
+        run: |
+          go test -run '^$' -bench . -benchtime=1x ./...
+          (cd benchmarks && go test -run '^$' -bench . -benchtime=1x ./...)
+
+  test:
+    name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ["1.25.x"]
+        include:
+          - os: ubuntu-latest
+            go: stable
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Test all modules
+        shell: bash
+        run: |
+          # The race detector needs cgo; skip it on Windows to avoid depending on a C toolchain.
+          race="-race"
+          if [ "$RUNNER_OS" = "Windows" ]; then race=""; fi
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "::group::$dir"
+            (cd "$dir" && go test $race -count=1 ./...)
+            echo "::endgroup::"
+          done
+
+  integration:
+    name: Database integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      # Transactions need a replica set, which service containers cannot
+      # configure, so MongoDB is started directly.
+      - name: Start MongoDB replica set
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:8 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' && break
+            sleep 2
+          done
+          docker exec mongo mongosh --quiet --eval \
+            'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "localhost:27017" }] })'
+          for i in $(seq 1 30); do
+            [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary')" = "true" ] && exit 0
+            sleep 2
+          done
+          echo "MongoDB replica set did not become primary"
+          exit 1
+
+      - name: Run integration tests
+        env:
+          TORGE_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          TORGE_TEST_MONGO_URI: mongodb://localhost:27017/?replicaSet=rs0
+        run: |
+          for m in pgx mongo; do
+            (cd "contrib/$m" && go test -race -count=1 -run TestTransactions -v ./...) | tee "$m.log"
+            # Fail if the database tests skipped instead of running.
+            if grep -q -- '--- SKIP: TestTransactions' "$m.log"; then
+              echo "contrib/$m integration test was skipped"
+              exit 1
+            fi
+          done
