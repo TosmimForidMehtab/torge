@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 )
@@ -338,8 +339,8 @@ func (c *Context) finish() {
 	if c.x == nil {
 		return
 	}
-	for i := len(c.x.cleanups) - 1; i >= 0; i-- {
-		c.x.cleanups[i]()
+	for _, v := range slices.Backward(c.x.cleanups) {
+		v()
 	}
 }
 

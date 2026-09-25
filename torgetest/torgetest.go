@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -226,9 +227,7 @@ func (r *Request) Build() *http.Request {
 	if r.ctx != nil {
 		req = req.WithContext(r.ctx)
 	}
-	for k, v := range r.header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, r.header)
 	if r.remoteAddr != "" {
 		req.RemoteAddr = r.remoteAddr
 	}
@@ -401,12 +400,15 @@ func Decode[T any](r *Response) T {
 }
 
 // Server starts app and serves it on a real loopback listener, for tests that
-// need a network (HTTP clients, WebSockets). The server is closed at the end
-// of the test.
+// need a network (HTTP clients, WebSockets). The server uses the app's own
+// configuration (timeouts, header limits), as Listen does. It is closed at
+// the end of the test.
 func Server(t testing.TB, app *torge.App) *httptest.Server {
 	t.Helper()
 	Start(t, app)
-	srv := httptest.NewServer(app)
+	srv := httptest.NewUnstartedServer(app)
+	srv.Config = app.Server()
+	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv
 }

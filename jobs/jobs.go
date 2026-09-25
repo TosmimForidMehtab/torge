@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -396,8 +397,8 @@ func (m *Manager) process(base context.Context, d Delivery) {
 		return
 	}
 	h := reg.handler
-	for i := len(m.opts.Middleware) - 1; i >= 0; i-- {
-		h = m.opts.Middleware[i](h)
+	for _, v := range slices.Backward(m.opts.Middleware) {
+		h = v(h)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, reg.timeout)
 	start := time.Now()

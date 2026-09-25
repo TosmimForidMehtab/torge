@@ -158,6 +158,9 @@ func currentModule() (string, error) {
 			return strings.Trim(strings.TrimSpace(rest), `"`), nil
 		}
 	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("read go.mod: %w", err)
+	}
 	return "", errors.New("go.mod has no module directive")
 }
 

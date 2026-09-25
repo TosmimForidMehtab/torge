@@ -42,6 +42,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -650,8 +651,8 @@ func (a *App) noRoute(c *Context, path string) error {
 	r := c.req
 	if a.opts.RedirectTrailingSlash && path != "/" && !strings.Contains(path, "//") {
 		alt := path + "/"
-		if strings.HasSuffix(path, "/") {
-			alt = strings.TrimSuffix(path, "/")
+		if before, ok := strings.CutSuffix(path, "/"); ok {
+			alt = before
 		}
 		method := r.Method
 		if method == http.MethodHead {
@@ -724,8 +725,8 @@ func (a *App) runStopHooks(ctx context.Context) error {
 	a.started = nil
 	a.mu.Unlock()
 	var errs []error
-	for i := len(started) - 1; i >= 0; i-- {
-		h := started[i]
+	for _, h := range slices.Backward(started) {
+
 		if h.OnStop == nil {
 			continue
 		}

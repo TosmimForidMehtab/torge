@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -439,8 +440,8 @@ func (ct *container) manage(p *provider, v reflect.Value) {
 
 // closeBuilt closes constructed closers when construction fails midway.
 func (ct *container) closeBuilt(ctx context.Context) {
-	for i := len(ct.hooks) - 1; i >= 0; i-- {
-		if h := ct.hooks[i]; h.OnStart == nil && h.OnStop != nil {
+	for _, h := range slices.Backward(ct.hooks) {
+		if h.OnStart == nil && h.OnStop != nil {
 			_ = h.OnStop(ctx)
 		}
 	}
@@ -547,7 +548,7 @@ func (c *Context) resolve(t reflect.Type) (reflect.Value, error) {
 	}
 	x.scoped[t] = v
 	if !isNilValue(v) {
-		if cl, ok := v.Interface().(io.Closer); ok {
+		if cl, ok := reflect.TypeAssert[io.Closer](v); ok {
 			c.OnDone(func() { _ = cl.Close() })
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/base32"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -285,9 +286,7 @@ func SecurityHeaders(cfgs ...SecurityConfig) Middleware {
 	if cfg.ContentSecurityPolicy != "" {
 		headers["Content-Security-Policy"] = cfg.ContentSecurityPolicy
 	}
-	for k, v := range cfg.Headers {
-		headers[k] = v
-	}
+	maps.Copy(headers, cfg.Headers)
 	type pair struct {
 		key   string
 		value []string

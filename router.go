@@ -2,6 +2,7 @@ package torge
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -224,21 +225,12 @@ func (rt *router) allowed(path string) []string {
 	if len(methods) == 0 {
 		return nil
 	}
-	if contains(methods, "GET") && !contains(methods, "HEAD") {
+	if slices.Contains(methods, "GET") && !slices.Contains(methods, "HEAD") {
 		methods = append(methods, "HEAD")
 	}
-	if !contains(methods, "OPTIONS") {
+	if !slices.Contains(methods, "OPTIONS") {
 		methods = append(methods, "OPTIONS")
 	}
 	sort.Strings(methods)
 	return methods
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

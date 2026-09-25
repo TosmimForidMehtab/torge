@@ -340,7 +340,7 @@ func ApplyRule(s *Schema, t reflect.Type, r validate.Rule) {
 			s.ExclusiveMaximum = ptr(num)
 		}
 	case "oneof":
-		for _, o := range strings.Fields(r.Param) {
+		for o := range strings.FieldsSeq(r.Param) {
 			s.Enum = append(s.Enum, ParseValue(o, t))
 		}
 	case "eq":

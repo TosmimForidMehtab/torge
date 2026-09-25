@@ -3,6 +3,7 @@ package torge
 import (
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -81,8 +82,8 @@ func forwardedClient(values []string, a *App) string {
 			}
 		}
 	}
-	for i := len(hops) - 1; i >= 0; i-- {
-		addr, err := netip.ParseAddr(hops[i])
+	for i, hop := range slices.Backward(hops) {
+		addr, err := netip.ParseAddr(hop)
 		if err != nil {
 			return ""
 		}

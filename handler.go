@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -32,8 +33,8 @@ func (m Middleware) applyRoute(r *routeConfig) { r.middleware = append(r.middlew
 
 // Chain composes middleware so that mws[0] is the outermost.
 func Chain(h Handler, mws ...Middleware) Handler {
-	for i := len(mws) - 1; i >= 0; i-- {
-		h = mws[i](h)
+	for _, mw := range slices.Backward(mws) {
+		h = mw(h)
 	}
 	return h
 }

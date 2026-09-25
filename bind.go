@@ -135,9 +135,9 @@ func decodeError(err error) error {
 	if errors.As(err, &syntaxErr) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, errTrailingData) {
 		return BadRequest(CodeInvalidJSON, "Request body is not valid JSON").Wrap(err)
 	}
-	if strings.HasPrefix(err.Error(), "json: unknown field ") {
+	if after, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
 		return BadRequest(CodeInvalidJSON, "Request body contains an unknown field").
-			WithDetails(map[string]string{"field": strings.Trim(strings.TrimPrefix(err.Error(), "json: unknown field "), `"`)}).
+			WithDetails(map[string]string{"field": strings.Trim(after, `"`)}).
 			Wrap(err)
 	}
 	return BadRequest(CodeInvalidJSON, "Request body could not be decoded").Wrap(err)

@@ -129,8 +129,8 @@ func New(cfg Config) (*Client, error) {
 	if rt == nil {
 		rt = DefaultTransport()
 	}
-	for i := len(cfg.Middleware) - 1; i >= 0; i-- {
-		rt = cfg.Middleware[i](rt)
+	for _, v := range slices.Backward(cfg.Middleware) {
+		rt = v(rt)
 	}
 	if cfg.Logger != nil {
 		rt = &loggingTransport{next: rt, log: cfg.Logger}

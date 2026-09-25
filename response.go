@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 )
 
 // ResponseWriter wraps http.ResponseWriter to record the status code and the
@@ -67,8 +68,8 @@ func (w *ResponseWriter) runBefore() {
 	w.before = nil
 	// Run in reverse registration order so that outer middleware sees the
 	// response after inner middleware adjusted it, mirroring unwinding.
-	for i := len(hooks) - 1; i >= 0; i-- {
-		hooks[i]()
+	for _, hook := range slices.Backward(hooks) {
+		hook()
 	}
 }
 

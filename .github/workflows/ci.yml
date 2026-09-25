@@ -56,7 +56,8 @@ jobs:
 
       - name: staticcheck
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          # v0.7.0 is the newest staticcheck that builds with Go 1.25 (v0.8+ needs Go 1.26).
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
           for dir in $(go list -m -f '{{.Dir}}'); do
             (cd "$dir" && staticcheck ./...)
           done

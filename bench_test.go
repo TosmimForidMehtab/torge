@@ -82,7 +82,7 @@ func BenchmarkStdlibMuxParams(b *testing.B) {
 	h := func(http.ResponseWriter, *http.Request) {}
 	for _, r := range githubRoutes {
 		p := r
-		for _, seg := range strings.Split(r, "/") {
+		for seg := range strings.SplitSeq(r, "/") {
 			if strings.HasPrefix(seg, ":") {
 				p = strings.Replace(p, seg, "{"+seg[1:]+"}", 1)
 			}

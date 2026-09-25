@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/TosmimForidMehtab/torge/openapi"
@@ -184,8 +185,8 @@ func (r *route) resolve() *routeConfig {
 	for g := r.group; g != nil && g.parent != nil; g = g.parent {
 		groups = append(groups, g)
 	}
-	for i := len(groups) - 1; i >= 0; i-- {
-		g := groups[i]
+	for _, g := range slices.Backward(groups) {
+
 		for _, o := range g.opts {
 			o.applyRoute(cfg)
 		}

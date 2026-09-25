@@ -3,6 +3,7 @@ package torge
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"sort"
@@ -68,9 +69,7 @@ func (a *App) OpenAPI(cfg OpenAPIConfig) {
 	setDefault(&cfg.Info.Version, "1.0.0")
 	st := a.openAPIStateLocked()
 	st.enabled, st.cfg = true, cfg
-	for name, s := range cfg.SecuritySchemes {
-		st.schemes[name] = s
-	}
+	maps.Copy(st.schemes, cfg.SecuritySchemes)
 	st.tags = append(st.tags, cfg.Tags...)
 }
 

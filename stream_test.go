@@ -58,8 +58,7 @@ func TestStreamingOverNetworkRespectsCancellation(t *testing.T) {
 		stopped <- err
 		return err
 	})
-	srv := torgetest.Server(t, app)
-	srv.Config.WriteTimeout = 50 * time.Millisecond
+	srv := torgetest.Server(t, app) // serves with the app's 50ms write timeout
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/stream", nil)

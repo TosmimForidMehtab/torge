@@ -306,10 +306,8 @@ func RequireRoles(roles ...string) torge.Middleware {
 		if !ok {
 			return errMissingRole
 		}
-		for _, role := range roles {
-			if r.HasRole(role) {
-				return nil
-			}
+		if slices.ContainsFunc(roles, r.HasRole) {
+			return nil
 		}
 		return errMissingRole
 	})
