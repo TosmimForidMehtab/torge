@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Torge deliberately keeps its core small and dependency-free. Please read the
+        [design principles](https://github.com/TosmimForidMehtab/torge/blob/main/CONTRIBUTING.md#design-principles)
+        before proposing a feature.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? Describe the use case, not only the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would the API look? A short code example helps.
+      render: go
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, including how you solve this today.
+
+  - type: dropdown
+    id: placement
+    attributes:
+      label: Where should it live?
+      options:
+        - Core module (standard library only)
+        - Optional package in the core module
+        - Contrib module (needs a third-party dependency)
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this.

@@ -179,6 +179,13 @@ Database integration tests run against real servers when configured:
 `TORGE_TEST_POSTGRES_URL` for `contrib/pgx`, `TORGE_TEST_MONGO_URI` (a
 replica set) for `contrib/mongo`.
 
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and
+the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as
+described in [SECURITY.md](SECURITY.md). Release notes are in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 Torge is released under the [MIT License](LICENSE).

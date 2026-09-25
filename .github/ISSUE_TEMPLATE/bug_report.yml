@@ -1,0 +1,56 @@
+name: Bug report
+description: Report something that does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. For security vulnerabilities,
+        **do not open an issue** — follow [SECURITY.md](https://github.com/TosmimForidMehtab/torge/blob/main/SECURITY.md).
+
+  - type: input
+    id: module
+    attributes:
+      label: Module and version
+      description: The module and version you use, from `go list -m all | grep torge`.
+      placeholder: github.com/TosmimForidMehtab/torge v0.1.1
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Go version and OS
+      placeholder: go1.25.2 linux/amd64
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the full error message, diagnostic or log output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: A small program or test that shows the problem. A failing `torgetest` test is ideal.
+      render: go
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that helps, such as deployment platform or configuration (never include secrets).

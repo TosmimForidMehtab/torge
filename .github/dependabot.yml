@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Published contrib modules and in-repo modules with third-party
+  # dependencies. The core module has none, so it is not listed.
+  - package-ecosystem: gomod
+    directories:
+      - /contrib/jwt
+      - /contrib/mongo
+      - /contrib/otel
+      - /contrib/pgx
+      - /contrib/redis
+      - /contrib/tests
+      - /benchmarks
+    schedule:
+      interval: weekly
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/TosmimForidMehtab/torge/security/advisories/new
+    about: Please report vulnerabilities privately, not as public issues.
+  - name: Documentation
+    url: https://github.com/TosmimForidMehtab/torge/blob/main/docs/guide.md
+    about: The guide covers every feature with examples.
