@@ -3,7 +3,7 @@ module github.com/TosmimForidMehtab/torge/contrib/tests
 go 1.26.0
 
 require (
-	github.com/TosmimForidMehtab/torge v0.1.0
+	github.com/TosmimForidMehtab/torge v0.2.0
 	github.com/TosmimForidMehtab/torge/contrib/otel v0.0.0-00010101000000-000000000000
 	github.com/TosmimForidMehtab/torge/contrib/redis v0.0.0-00010101000000-000000000000
 	github.com/alicebob/miniredis/v2 v2.39.0
