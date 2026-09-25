@@ -9,11 +9,15 @@ entries are marked with their module.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-26
+
 ### Changed
 
 - The minimum Go version is now 1.26 for the core module and every contrib
   module. CI tests Go 1.26 and 1.27, `torge doctor` checks for 1.26, and new
   projects from `torge new` target Go 1.26.
+- contrib/otel, contrib/redis, contrib/jwt, contrib/pgx, contrib/mongo:
+  released as v0.2.0, requiring Go 1.26 and core v0.2.0. No API changes.
 
 ## [0.1.2] - 2026-09-26
 
@@ -89,7 +93,8 @@ Initial release.
 - Contrib modules `contrib/otel`, `contrib/redis`, `contrib/jwt`,
   `contrib/pgx` and `contrib/mongo`, each at v0.1.0.
 
-[Unreleased]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/TosmimForidMehtab/torge/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/TosmimForidMehtab/torge/releases/tag/v0.1.0
