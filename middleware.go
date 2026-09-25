@@ -56,16 +56,17 @@ func RequestID(cfgs ...RequestIDConfig) Middleware {
 	}
 	return func(next Handler) Handler {
 		return func(c *Context) error {
-			if c.requestID != "" {
+			if c.requestID[0] != "" {
 				return next(c)
 			}
 			id := c.req.Header.Get(header)
 			if id == "" || !validRequestID(id) || !trust(c) {
 				id = gen()
 			}
-			c.requestID = id
-			c.res.Header().Set(header, id)
-			c.SetContext(correlation.WithRequestID(c.Context(), id))
+			c.requestID[0] = id
+			// Capacity 1: Header.Add copies instead of writing into the Context.
+			c.res.Header()[header] = c.requestID[:1:1]
+			c.pending |= pendingRequestID // attached to the context on first use
 			return next(c)
 		}
 	}
@@ -198,7 +199,9 @@ func Logger(cfgs ...AccessLogConfig) Middleware {
 			case status >= 400:
 				level = slog.LevelWarn
 			}
-			ctx := c.Context()
+			// The raw request context: the request ID is on c, and reading
+			// c.Context() would attach pending values nothing else needs.
+			ctx := c.req.Context()
 			h := slog.Default().Handler()
 			if c.app != nil {
 				h = c.app.accessHandler
@@ -208,10 +211,11 @@ func Logger(cfgs ...AccessLogConfig) Middleware {
 			if !h.Enabled(ctx, level) {
 				return err
 			}
+			end := time.Now()
 			attrs := make([]slog.Attr, 0, 14)
 			// Correlation attributes are added here, in the same batch, rather
 			// than by the correlation handler, so the record grows only once.
-			if id := correlation.RequestID(ctx); id != "" {
+			if id := c.requestID[0]; id != "" {
 				attrs = append(attrs, slog.String("request_id", id))
 			}
 			if id := correlation.TraceID(ctx); id != "" {
@@ -222,7 +226,7 @@ func Logger(cfgs ...AccessLogConfig) Middleware {
 				slog.String("route", c.RoutePattern()),
 				slog.String("path", c.req.URL.Path),
 				slog.Int("status", status),
-				slog.Duration("duration", time.Since(start)),
+				slog.Duration("duration", end.Sub(start)),
 				slog.Int64("bytes", c.res.Size()),
 				slog.String("ip", c.RealIP()),
 			)
@@ -240,7 +244,7 @@ func Logger(cfgs ...AccessLogConfig) Middleware {
 			}
 			// Build the record directly: slog.Logger would capture the
 			// caller's program counter, which access logs never need.
-			r := slog.NewRecord(time.Now(), level, "request", 0)
+			r := slog.NewRecord(end, level, "request", 0)
 			r.AddAttrs(attrs...)
 			_ = h.Handle(ctx, r)
 			return err

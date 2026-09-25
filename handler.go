@@ -70,7 +70,7 @@ func WrapMiddleware(m func(http.Handler) http.Handler) Middleware {
 					c.HandleError(err)
 				}
 			})
-			m(inner).ServeHTTP(c.Response(), c.req)
+			m(inner).ServeHTTP(c.Response(), c.Request())
 			return err
 		}
 	}

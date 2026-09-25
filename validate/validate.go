@@ -373,12 +373,11 @@ func (v *Validator) validateStruct(rv reflect.Value, p *typePlan, path string, e
 	for i := range p.fields {
 		fp := &p.fields[i]
 		fv := rv.Field(fp.index)
-		fpath := joinPath(path, fp.name)
-		if !v.applyValuePlan(fv, &fp.checks, fpath, errs) {
+		if !v.applyValuePlan(fv, &fp.checks, path, fp.name, errs) {
 			continue
 		}
 		if fp.nested {
-			v.validateNested(fv, fpath, errs)
+			v.validateNested(fv, joinPath(path, fp.name), errs)
 		}
 	}
 	if p.validatable {
@@ -386,38 +385,41 @@ func (v *Validator) validateStruct(rv reflect.Value, p *typePlan, path string, e
 	}
 }
 
-// applyValuePlan runs the checks for one value. It returns false if the value
-// is absent or failed a check, in which case nested validation is skipped.
-func (v *Validator) applyValuePlan(fv reflect.Value, vp *valuePlan, path string, errs *Errors) bool {
+// applyValuePlan runs the checks for one value, named name within parent. It
+// returns false if the value is absent or failed a check, in which case nested
+// validation is skipped. The value's path is only built when a check fails,
+// so validating correct input allocates nothing.
+func (v *Validator) applyValuePlan(fv reflect.Value, vp *valuePlan, parent, name string, errs *Errors) bool {
 	dv, present := deref(fv)
 	if !present || (vp.omitempty && dv.IsZero()) {
 		if vp.required {
-			*errs = append(*errs, FieldError{Field: path, Rule: "required", Message: "is required"})
+			*errs = append(*errs, FieldError{Field: joinPath(parent, name), Rule: "required", Message: "is required"})
 		}
 		return false
 	}
 	if vp.required && isEmpty(dv) {
-		*errs = append(*errs, FieldError{Field: path, Rule: "required", Message: "is required"})
+		*errs = append(*errs, FieldError{Field: joinPath(parent, name), Rule: "required", Message: "is required"})
 		return false
 	}
 	// Report only the first failing rule per value: later rules usually
 	// restate the same problem.
 	for _, c := range vp.checks {
 		if !c.fn(dv) {
-			*errs = append(*errs, FieldError{Field: path, Rule: c.rule, Param: c.param, Message: c.message})
+			*errs = append(*errs, FieldError{Field: joinPath(parent, name), Rule: c.rule, Param: c.param, Message: c.message})
 			return false
 		}
 	}
 	if vp.dive != nil {
+		path := joinPath(parent, name)
 		switch dv.Kind() {
 		case reflect.Slice, reflect.Array:
 			for i := range dv.Len() {
-				v.applyValuePlan(dv.Index(i), vp.dive, path+"["+strconv.Itoa(i)+"]", errs)
+				v.applyValuePlan(dv.Index(i), vp.dive, path+"["+strconv.Itoa(i)+"]", "", errs)
 			}
 		case reflect.Map:
 			iter := dv.MapRange()
 			for iter.Next() {
-				v.applyValuePlan(iter.Value(), vp.dive, path+"["+fmt.Sprint(iter.Key().Interface())+"]", errs)
+				v.applyValuePlan(iter.Value(), vp.dive, path+"["+fmt.Sprint(iter.Key().Interface())+"]", "", errs)
 			}
 		}
 	}

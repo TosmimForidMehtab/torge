@@ -536,7 +536,11 @@ func (a *App) buildPipeline() {
 		}
 		stages = append(stages, stage{"access-log", Logger(cfg)})
 	}
-	stages = append(stages, stage{"error-boundary", errorBoundary})
+	// The boundary lets outer stages (tracing, access log) observe the rendered
+	// status. Without them, ServeHTTP renders errors itself.
+	if o.Tracing != nil || o.AccessLog != nil {
+		stages = append(stages, stage{"error-boundary", errorBoundary})
+	}
 	if o.Recovery != nil {
 		stages = append(stages, stage{"recovery", Recovery(*o.Recovery)})
 	}
@@ -642,7 +646,14 @@ func (a *App) dispatch(c *Context) error {
 		if r.ContentLength > limit {
 			return AsError(&http.MaxBytesError{Limit: limit})
 		}
-		r.Body = http.MaxBytesReader(c.res, r.Body, limit)
+		if r.ContentLength >= 0 {
+			// The server never delivers more than the declared length; the
+			// embedded limiter still guards bodies replaced by outer handlers.
+			c.limiter = limitedBody{rc: r.Body, left: limit, limit: limit}
+			r.Body = &c.limiter
+		} else {
+			r.Body = http.MaxBytesReader(c.res, r.Body, limit)
+		}
 	}
 	return rt.composed(c)
 }

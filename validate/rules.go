@@ -200,12 +200,62 @@ func isEmail(s string) bool {
 	if len(s) > 254 || strings.ContainsAny(s, " <>") {
 		return false
 	}
+	if valid, decided := simpleEmail(s); decided {
+		return valid
+	}
 	addr, err := mail.ParseAddress(s)
 	if err != nil || addr.Address != s {
 		return false
 	}
 	at := strings.LastIndexByte(s, '@')
 	return at > 0 && strings.Contains(s[at+1:], ".")
+}
+
+// atextBytes marks the RFC 5322 atext characters (letters, digits and
+// !#$%&'*+-/=?^_`{|}~).
+var atextBytes = func() (t [256]bool) {
+	for c := range 256 {
+		b := byte(c)
+		t[c] = 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' ||
+			strings.IndexByte("!#$%&'*+-/=?^_`{|}~", b) >= 0
+	}
+	return t
+}()
+
+// simpleEmail decides, without allocating, the addresses whose result is
+// certain: plain "local@domain" dot-atoms. It reports decided=false for
+// anything else (quotes, comments, non-ASCII, unusual dots), which is then
+// checked with net/mail exactly as before.
+func simpleEmail(s string) (valid, decided bool) {
+	at := -1
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '@':
+			if at >= 0 {
+				return false, true // several @ in plain text never parse
+			}
+			at = i
+		case c != '.' && !atextBytes[c]:
+			return false, false
+		}
+	}
+	if at < 0 {
+		return false, true // plain text without @ never parses
+	}
+	local, domain := s[:at], s[at+1:]
+	if !cleanDotAtom(local) || !cleanDotAtom(domain) {
+		return false, false
+	}
+	return strings.IndexByte(domain, '.') >= 0, true
+}
+
+// cleanDotAtom reports whether s is non-empty with no leading, trailing or
+// doubled dots.
+func cleanDotAtom(s string) bool {
+	if s == "" || s[0] == '.' || s[len(s)-1] == '.' {
+		return false
+	}
+	return !strings.Contains(s, "..")
 }
 
 func isURL(s string) bool {

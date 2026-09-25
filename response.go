@@ -17,10 +17,11 @@ import (
 // sendfile keep working.
 type ResponseWriter struct {
 	http.ResponseWriter
-	status  int
 	size    int64
+	status  int32
 	written bool
-	before  []func()
+	// before is allocated on first use; few requests register hooks.
+	before *[]func()
 }
 
 func newResponseWriter(w http.ResponseWriter) *ResponseWriter {
@@ -28,7 +29,7 @@ func newResponseWriter(w http.ResponseWriter) *ResponseWriter {
 }
 
 // Status returns the status code sent, or 0 if headers were not written.
-func (w *ResponseWriter) Status() int { return w.status }
+func (w *ResponseWriter) Status() int { return int(w.status) }
 
 // Size returns the number of body bytes written.
 func (w *ResponseWriter) Size() int64 { return w.size }
@@ -43,7 +44,10 @@ func (w *ResponseWriter) Before(fn func()) bool {
 	if w.written {
 		return false
 	}
-	w.before = append(w.before, fn)
+	if w.before == nil {
+		w.before = new([]func())
+	}
+	*w.before = append(*w.before, fn)
 	return true
 }
 
@@ -58,13 +62,16 @@ func (w *ResponseWriter) WriteHeader(code int) {
 		return
 	}
 	w.runBefore()
-	w.status = code
+	w.status = int32(code)
 	w.written = true
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *ResponseWriter) runBefore() {
-	hooks := w.before
+	if w.before == nil {
+		return
+	}
+	hooks := *w.before
 	w.before = nil
 	// Run in reverse registration order so that outer middleware sees the
 	// response after inner middleware adjusted it, mirroring unwinding.
@@ -142,3 +149,28 @@ func (w *ResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter 
 // errAlreadyWritten is returned by helpers that need to write headers after the
 // response was committed.
 var errAlreadyWritten = errors.New("torge: response already written")
+
+// limitedBody is a request body that fails with *http.MaxBytesError once more
+// than limit bytes are read, like http.MaxBytesReader.
+type limitedBody struct {
+	rc          io.ReadCloser
+	left, limit int64
+}
+
+func (l *limitedBody) Read(p []byte) (int, error) {
+	if l.left < 0 {
+		return 0, &http.MaxBytesError{Limit: l.limit}
+	}
+	if int64(len(p)) > l.left+1 {
+		p = p[:l.left+1]
+	}
+	n, err := l.rc.Read(p)
+	if int64(n) <= l.left {
+		l.left -= int64(n)
+		return n, err
+	}
+	n, l.left = int(l.left), -1
+	return n, &http.MaxBytesError{Limit: l.limit}
+}
+
+func (l *limitedBody) Close() error { return l.rc.Close() }

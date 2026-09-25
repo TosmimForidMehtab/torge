@@ -1,6 +1,7 @@
 package torge
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -218,17 +219,58 @@ func (JSONSerializer) Encode(w io.Writer, v any) error { return json.NewEncoder(
 
 // Decode implements Serializer.
 func (s JSONSerializer) Decode(r io.Reader, v any) error {
-	dec := json.NewDecoder(r)
-	if s.DisallowUnknownFields {
-		dec.DisallowUnknownFields()
+	return s.decode(r, -1, v)
+}
+
+// decode reads the whole body (sizeHint is its expected length, or -1) and
+// decodes a single JSON value from it. A body that is empty or only
+// whitespace yields io.EOF; anything after the value is rejected.
+func (s JSONSerializer) decode(r io.Reader, sizeHint int64, v any) error {
+	b, err := readAll(r, sizeHint)
+	if err != nil {
+		return err
 	}
+	if len(bytes.TrimLeft(b, " \t\r\n")) == 0 {
+		return io.EOF
+	}
+	if !s.DisallowUnknownFields {
+		return json.Unmarshal(b, v)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return err
 	}
-	if dec.More() {
+	if len(bytes.TrimLeft(b[dec.InputOffset():], " \t\r\n")) != 0 {
 		return errTrailingData
 	}
 	return nil
+}
+
+// maxPrealloc caps the buffer allocated up front from a declared length.
+const maxPrealloc = 1 << 20
+
+// readAll is io.ReadAll with the first buffer sized from sizeHint, so a body
+// of the declared length is read with a single allocation.
+func readAll(r io.Reader, sizeHint int64) ([]byte, error) {
+	size := 512
+	if sizeHint > 0 && sizeHint < maxPrealloc {
+		size = int(sizeHint) + 1 // one spare byte to observe io.EOF
+	}
+	b := make([]byte, 0, size)
+	for {
+		n, err := r.Read(b[len(b):cap(b)])
+		b = b[:len(b)+n]
+		if err != nil {
+			if err == io.EOF {
+				return b, nil
+			}
+			return b, err
+		}
+		if len(b) == cap(b) {
+			b = append(b, 0)[:len(b)]
+		}
+	}
 }
 
 // errTrailingData reports a request body with data after the first value.

@@ -270,6 +270,15 @@ func TestBodyLimit(t *testing.T) {
 	if rec.Code != 413 {
 		t.Fatalf("expected 413 for oversized chunked body, got %d", rec.Code)
 	}
+	// Declared length smaller than the real body (e.g. swapped by an outer
+	// handler): still enforced while reading.
+	req = tc.POST("/small").Text(strings.Repeat("z", 64)).Build()
+	req.ContentLength = 4
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	if rec.Code != 413 {
+		t.Fatalf("expected 413 for understated length, got %d", rec.Code)
+	}
 	tc.POST("/big").Text(strings.Repeat("x", 50)).Do().ExpectStatus(200)
 }
 

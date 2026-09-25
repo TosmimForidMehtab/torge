@@ -104,7 +104,12 @@ func (c *Context) decodeBody(dst any) (bool, error) {
 		return false, NewError(http.StatusUnsupportedMediaType, CodeUnsupportedMedia,
 			fmt.Sprintf("Content-Type %q is not supported; send %s", ct, baseMediaType(s.ContentType())))
 	}
-	err := s.Decode(r.Body, dst)
+	var err error
+	if js, ok := s.(JSONSerializer); ok {
+		err = js.decode(r.Body, r.ContentLength, dst)
+	} else {
+		err = s.Decode(r.Body, dst)
+	}
 	if err == nil {
 		return true, nil
 	}
@@ -163,13 +168,56 @@ func jsonTypeName(t reflect.Type) string {
 	}
 }
 
+// baseMediaType returns the media type of a Content-Type value without its
+// parameters, as mime.ParseMediaType does (the result may differ in case; it
+// is only compared case-insensitively), or ct itself if it does not parse.
 func baseMediaType(ct string) string {
+	if mt, ok := simpleMediaType(ct); ok {
+		return mt
+	}
 	mt, _, err := mime.ParseMediaType(ct)
 	if err != nil {
 		return ct
 	}
 	return mt
 }
+
+// simpleMediaType handles the common shapes "type/subtype" and
+// "type/subtype; charset=utf-8" without allocating. It reports false for
+// anything else, which then goes through mime.ParseMediaType.
+func simpleMediaType(ct string) (string, bool) {
+	mt, params, hasParams := strings.Cut(ct, ";")
+	mt = strings.TrimSpace(mt)
+	if hasParams && !strings.EqualFold(strings.TrimSpace(params), "charset=utf-8") {
+		return "", false
+	}
+	slash := -1
+	for i := 0; i < len(mt); i++ {
+		switch c := mt[i]; {
+		case c == '/':
+			if slash >= 0 {
+				return "", false
+			}
+			slash = i
+		case !isTokenByte(c):
+			return "", false
+		}
+	}
+	if slash <= 0 || slash == len(mt)-1 {
+		return "", false
+	}
+	return mt, true
+}
+
+// tokenBytes marks the bytes allowed in an RFC 7230 token.
+var tokenBytes = func() (t [256]bool) {
+	for c := '!'; c <= '~'; c++ {
+		t[c] = !strings.ContainsRune(`()<>@,;:\"/[]?={}`, c)
+	}
+	return t
+}()
+
+func isTokenByte(c byte) bool { return tokenBytes[c] }
 
 // contentTypeMatches reports whether a request content type is acceptable for
 // the serializer, treating any "+json" suffix type as JSON.
@@ -178,7 +226,7 @@ func contentTypeMatches(got, want string) bool {
 	if strings.EqualFold(g, w) {
 		return true
 	}
-	return w == "application/json" && strings.HasSuffix(strings.ToLower(g), "+json")
+	return strings.EqualFold(w, "application/json") && len(g) >= 5 && strings.EqualFold(g[len(g)-5:], "+json")
 }
 
 // contextSource adapts a Context to binding.Source.

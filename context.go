@@ -3,6 +3,7 @@ package torge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,6 +16,8 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+
+	"github.com/TosmimForidMehtab/torge/correlation"
 )
 
 // Context is the per-request context passed to handlers and middleware.
@@ -43,7 +46,9 @@ type Context struct {
 	// allocation per request.
 	valsBuf [4]string
 
-	requestID string
+	// requestID[0] is the request ID; the array also backs the response
+	// header value, so setting the header allocates nothing.
+	requestID [1]string
 	query     url.Values
 	realIP    string
 
@@ -51,6 +56,12 @@ type Context struct {
 	// per-request allocation small.
 	x *contextExtras
 
+	// body enforces the body limit without a separate allocation.
+	limiter limitedBody
+
+	// bodyStatus is the status for the body being encoded by JSON.
+	bodyStatus   int32
+	pending      uint8 // values not yet attached to req's context
 	accessLogged bool
 	handled      bool
 }
@@ -85,11 +96,39 @@ func (a *App) NewContext(w http.ResponseWriter, r *http.Request) *Context {
 	return &Context{req: r, res: newResponseWriter(w), app: a}
 }
 
-// Request returns the current *http.Request.
-func (c *Context) Request() *http.Request { return c.req }
+// Request returns the current *http.Request. Its context carries the request
+// ID and the authenticated principal.
+func (c *Context) Request() *http.Request {
+	c.syncContext()
+	return c.req
+}
 
 // SetRequest replaces the request, for middleware that needs to modify it.
 func (c *Context) SetRequest(r *http.Request) { c.req = r }
+
+// Values attached with SetUser and by the request ID stage are added to the
+// request's context.Context only when the context is first observed (through
+// Context or Request). Most requests never observe it, and attaching values
+// eagerly costs a copy of the http.Request plus allocations per value.
+const (
+	pendingRequestID uint8 = 1 << iota
+	pendingUser
+)
+
+func (c *Context) syncContext() {
+	if c.pending == 0 {
+		return
+	}
+	ctx := c.req.Context()
+	if c.pending&pendingRequestID != 0 {
+		ctx = correlation.WithRequestID(ctx, c.requestID[0])
+	}
+	if c.pending&pendingUser != 0 {
+		ctx = context.WithValue(ctx, userKey{}, c.User())
+	}
+	c.pending = 0
+	c.req = c.req.WithContext(ctx)
+}
 
 // Response returns the response writer.
 func (c *Context) Response() *ResponseWriter { return c.res }
@@ -114,8 +153,12 @@ func (c *Context) SetResponseWriter(w http.ResponseWriter) (restore func()) {
 	return c.swapWriter(w)
 }
 
-// Context returns the request's context.Context.
-func (c *Context) Context() context.Context { return c.req.Context() }
+// Context returns the request's context.Context. It carries the request ID
+// (see correlation.RequestID) and the authenticated principal (see UserFrom).
+func (c *Context) Context() context.Context {
+	c.syncContext()
+	return c.req.Context()
+}
 
 // SetContext replaces the request's context. Middleware uses it to attach
 // deadlines or values; ctx must derive from c.Context().
@@ -233,7 +276,7 @@ func (c *Context) ReadBody() ([]byte, error) {
 }
 
 // RequestID returns the request ID, or "" if request IDs are disabled.
-func (c *Context) RequestID() string { return c.requestID }
+func (c *Context) RequestID() string { return c.requestID[0] }
 
 // User returns the authenticated principal, or nil.
 func (c *Context) User() Principal {
@@ -247,7 +290,7 @@ func (c *Context) User() Principal {
 // calls it; the principal is also attached to c.Context() (see UserFrom).
 func (c *Context) SetUser(p Principal) {
 	c.extras().user = p
-	c.SetContext(context.WithValue(c.Context(), userKey{}, p))
+	c.pending |= pendingUser
 }
 
 type userKey struct{}
@@ -400,12 +443,38 @@ func (c *Context) JSON(status int, v any) error {
 		return errAlreadyWritten
 	}
 	s := c.serializer()
+	if _, ok := s.(JSONSerializer); ok {
+		// encoding/json encodes the whole value before a single Write, so
+		// streaming into the response keeps the all-or-nothing behavior
+		// without an intermediate buffer.
+		c.bodyStatus = int32(status)
+		if err := json.NewEncoder((*jsonBody)(c)).Encode(v); err != nil {
+			if c.res.Written() {
+				return err
+			}
+			return fmt.Errorf("torge: encode response: %w", err)
+		}
+		return nil
+	}
 	buf := getBuffer()
 	defer putBuffer(buf)
 	if err := s.Encode(buf, v); err != nil {
 		return fmt.Errorf("torge: encode response: %w", err)
 	}
 	return c.Bytes(status, s.ContentType(), buf.Bytes())
+}
+
+// jsonBody writes an encoded JSON body with the status recorded by JSON. It
+// shares Context's memory layout, so converting a *Context to an io.Writer
+// allocates nothing.
+type jsonBody Context
+
+func (j *jsonBody) Write(b []byte) (int, error) {
+	c := (*Context)(j)
+	if err := c.writeBody(int(c.bodyStatus), jsonContentType[0], b, ""); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
 // String writes a plain-text response.
@@ -506,20 +575,20 @@ func (c *Context) Redirect(code int, url string) error {
 	if code < 300 || code > 399 {
 		return fmt.Errorf("torge: invalid redirect status %d", code)
 	}
-	http.Redirect(c.res, c.req, url, code)
+	http.Redirect(c.res, c.Request(), url, code)
 	return nil
 }
 
 // File serves a file from the local filesystem, handling Range and
 // conditional requests.
 func (c *Context) File(path string) error {
-	http.ServeFile(c.res, c.req, path)
+	http.ServeFile(c.res, c.Request(), path)
 	return nil
 }
 
 // FileFS serves name from fsys.
 func (c *Context) FileFS(fsys fs.FS, name string) error {
-	http.ServeFileFS(c.res, c.req, fsys, name)
+	http.ServeFileFS(c.res, c.Request(), fsys, name)
 	return nil
 }
 

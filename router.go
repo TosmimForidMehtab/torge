@@ -34,8 +34,10 @@ func (n *node) staticChild(seg string) *node {
 	if n.index != nil {
 		return n.index[seg]
 	}
+	// Rejecting on length and first byte avoids a string comparison call for
+	// most non-matching children.
 	for i, l := range n.labels {
-		if l == seg {
+		if len(l) == len(seg) && (len(l) == 0 || l[0] == seg[0]) && l == seg {
 			return n.kids[i]
 		}
 	}
@@ -188,7 +190,14 @@ func (n *node) lookup(path string, values []string) (*route, []string) {
 // match matches rem, the remainder of the path after a '/', against n's
 // children.
 func (n *node) match(rem string, values []string) (*route, []string) {
-	seg, next, more := strings.Cut(rem, "/")
+	// Path segments are short, so an inline scan beats a library call.
+	seg, next, more := rem, "", false
+	for i := 0; i < len(rem); i++ {
+		if rem[i] == '/' {
+			seg, next, more = rem[:i], rem[i+1:], true
+			break
+		}
+	}
 	if child := n.staticChild(seg); child != nil {
 		if r, v := child.descend(next, more, values); r != nil {
 			return r, v

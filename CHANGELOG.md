@@ -20,8 +20,20 @@ entries are marked with their module.
   HMAC-SHA256 tags under a random per-verifier key instead of unkeyed SHA-256
   digests. Comparison stays constant-time and length-hiding; no behavior
   change for callers.
+- Performance: a realistic JSON API request (bind, validate, respond) is
+  about 40% faster with 11 allocations instead of 24, now ahead of Gin and
+  Echo in the benchmarks. JSON bodies are decoded from a single buffer, the
+  body limit no longer allocates when the length is declared, `Content-Type`
+  checks, validation paths and the `email` rule avoid allocating in the
+  common case, and request IDs and users are attached to the request context
+  lazily. See [docs/benchmarks.md](docs/benchmarks.md). The public API is
+  unchanged.
 
 ### Fixed
+
+- JSON request bodies followed by a stray `}` or `]` (for example
+  `{"a":1}}`) were accepted; they are now rejected as invalid JSON, like any
+  other trailing data.
 
 - `torge version` printed `dev` when installed with `go install`; it now
   prints the installed module version.
