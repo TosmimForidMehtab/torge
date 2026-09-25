@@ -3,7 +3,7 @@ module github.com/TosmimForidMehtab/torge/contrib/pgx
 go 1.26.0
 
 require (
-	github.com/TosmimForidMehtab/torge v0.1.0
+	github.com/TosmimForidMehtab/torge v0.2.0
 	github.com/jackc/pgx/v5 v5.11.0
 )
 

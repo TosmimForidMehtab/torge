@@ -2,7 +2,7 @@ module github.com/TosmimForidMehtab/torge/contrib/mongo
 
 go 1.26.0
 
-require github.com/TosmimForidMehtab/torge v0.1.0
+require github.com/TosmimForidMehtab/torge v0.2.0
 
 require (
 	github.com/klauspost/compress v1.19.2 // indirect
