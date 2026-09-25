@@ -4,7 +4,7 @@ package main
 
 const goModTpl = `module [[.Module]]
 
-go 1.25
+go 1.26
 [[- if .LocalDir]]
 
 replace [[.Torge]] => [[.LocalDir]]
@@ -310,7 +310,7 @@ func [[.Type]]() torge.Middleware {
 
 const dockerfileTpl = `# syntax=docker/dockerfile:1
 # Multi-stage build: a static binary in a minimal, non-root image.
-FROM golang:1.25 AS build
+FROM golang:1.26 AS build
 WORKDIR /src
 COPY go.* ./
 RUN go mod download

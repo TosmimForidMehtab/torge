@@ -1,6 +1,6 @@
 module github.com/TosmimForidMehtab/torge/contrib/redis
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/TosmimForidMehtab/torge v0.1.0

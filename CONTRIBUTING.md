@@ -20,7 +20,7 @@ instead of opening a public issue.
 
 ## Development setup
 
-Requirements: **Go 1.25 or newer** and Git. Docker is only needed to run the
+Requirements: **Go 1.26 or newer** and Git. Docker is only needed to run the
 database integration tests.
 
 ```sh
@@ -55,7 +55,7 @@ for dir in $(go list -m -f '{{.Dir}}'); do (cd "$dir" && go test -race ./...); d
 # Formatting, vet and staticcheck
 gofmt -l .
 for dir in $(go list -m -f '{{.Dir}}'); do (cd "$dir" && go vet ./...); done
-go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
 for dir in $(go list -m -f '{{.Dir}}'); do (cd "$dir" && staticcheck ./...); done
 
 # go.mod files must be tidy

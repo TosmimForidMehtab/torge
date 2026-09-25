@@ -20,7 +20,7 @@ type check struct {
 // problems.
 func cmdDoctor(stdout io.Writer) error {
 	checks := []check{
-		{"Go toolchain >= 1.25", checkGo},
+		{"Go toolchain >= 1.26", checkGo},
 		{"go.mod present", func() (bool, string) {
 			m, err := currentModule()
 			if err != nil {
@@ -69,8 +69,8 @@ func checkGo() (bool, string) {
 	}
 	major, _ := strconv.Atoi(parts[0])
 	minor, _ := strconv.Atoi(parts[1])
-	if major == 1 && minor < 25 {
-		return false, v + "; fix: upgrade to Go 1.25 or newer"
+	if major == 1 && minor < 26 {
+		return false, v + "; fix: upgrade to Go 1.26 or newer"
 	}
 	return true, v
 }

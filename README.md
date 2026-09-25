@@ -36,7 +36,7 @@ func main() {
 }
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 ```sh
 go get github.com/TosmimForidMehtab/torge

@@ -9,6 +9,12 @@ entries are marked with their module.
 
 ## [Unreleased]
 
+### Changed
+
+- The minimum Go version is now 1.26 for the core module and every contrib
+  module. CI tests Go 1.26 and 1.27, `torge doctor` checks for 1.26, and new
+  projects from `torge new` target Go 1.26.
+
 ## [0.1.2] - 2026-09-26
 
 ### Added
