@@ -9,6 +9,8 @@ entries are marked with their module.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-26
+
 ### Added
 
 - Release workflow: pushing a version tag publishes a GitHub release with
@@ -81,6 +83,7 @@ Initial release.
 - Contrib modules `contrib/otel`, `contrib/redis`, `contrib/jwt`,
   `contrib/pgx` and `contrib/mongo`, each at v0.1.0.
 
-[Unreleased]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/TosmimForidMehtab/torge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/TosmimForidMehtab/torge/releases/tag/v0.1.0
