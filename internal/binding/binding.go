@@ -39,7 +39,9 @@ type Param struct {
 	Default    string
 	HasDefault bool
 	multi      bool
-	decode     decoder
+	// comma splits single values on "," before decoding (tag option `comma`).
+	comma  bool
+	decode decoder
 }
 
 // Plan describes how to bind a struct type.
@@ -53,6 +55,32 @@ type Plan struct {
 	BodyType reflect.Type
 	// WholeBody reports that the body decodes into the whole struct.
 	WholeBody bool
+	// StrictBody rejects JSON bodies with unknown fields. StrictQuery
+	// rejects requests with undeclared query parameters. Both are enabled
+	// by embedding the torge.Strict marker.
+	StrictBody  bool
+	StrictQuery bool
+	// queryParams is the set of declared query parameter names.
+	queryParams map[string]struct{}
+}
+
+// Strict is the embedded marker enabling strict binding. It is aliased as
+// torge.Strict, which carries the public documentation.
+type Strict struct{}
+
+var strictType = reflect.TypeFor[Strict]()
+
+// isStrictMarker reports whether sf is an embedded Strict marker (by value
+// or pointer).
+func isStrictMarker(sf reflect.StructField) bool {
+	if !sf.Anonymous {
+		return false
+	}
+	t := sf.Type
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t == strictType
 }
 
 // Source provides raw request values.
@@ -83,6 +111,20 @@ func PlanFor(t reflect.Type) (*Plan, error) {
 		return nil, err
 	}
 	return actual.(*Plan), nil
+}
+
+// tagOptions returns the comma-separated options after the parameter name
+// in a location tag, e.g. ["comma"] for `query:"tag,comma"`.
+func tagOptions(sf reflect.StructField, loc Location) []string {
+	raw, ok := sf.Tag.Lookup(string(loc))
+	if !ok {
+		return nil
+	}
+	_, rest, _ := strings.Cut(raw, ",")
+	if rest == "" {
+		return nil
+	}
+	return strings.Split(rest, ",")
 }
 
 // ParamTag returns the location and name of a parameter field.
@@ -120,6 +162,14 @@ func compile(t reflect.Type) (*Plan, error) {
 		p.WholeBody = true
 		p.BodyType = t
 	}
+	for _, pr := range p.Params {
+		if pr.In == Query {
+			if p.queryParams == nil {
+				p.queryParams = make(map[string]struct{})
+			}
+			p.queryParams[pr.Name] = struct{}{}
+		}
+	}
 	return p, nil
 }
 
@@ -127,6 +177,10 @@ func collect(p *Plan, t reflect.Type, prefix []int, hasBodyFields *bool) error {
 	for i := range t.NumField() {
 		sf := t.Field(i)
 		index := append(append([]int(nil), prefix...), i)
+		if isStrictMarker(sf) {
+			p.StrictBody, p.StrictQuery = true, true
+			continue
+		}
 		loc, name, isParam := ParamTag(sf)
 		if !isParam && sf.Anonymous && sf.Type.Kind() == reflect.Struct {
 			if err := collect(p, sf.Type, index, hasBodyFields); err != nil {
@@ -151,9 +205,26 @@ func collect(p *Plan, t reflect.Type, prefix []int, hasBodyFields *bool) error {
 			param.multi = true
 			ft = ft.Elem()
 		}
+		for _, opt := range tagOptions(sf, loc) {
+			switch opt {
+			case "comma":
+				if !param.multi {
+					return fmt.Errorf("binding: %s.%s: comma option needs a slice field", t, sf.Name)
+				}
+				param.comma = true
+			default:
+				return fmt.Errorf("binding: %s.%s: unknown tag option %q", t, sf.Name, opt)
+			}
+		}
 		dec, err := decoderFor(ft)
 		if err != nil {
 			return fmt.Errorf("binding: %s.%s: %w", t, sf.Name, err)
+		}
+		if layout, ok := sf.Tag.Lookup("layout"); ok {
+			dec, err = layoutDecoder(ft, layout)
+			if err != nil {
+				return fmt.Errorf("binding: %s.%s: %w", t, sf.Name, err)
+			}
 		}
 		param.decode = dec
 		if def, ok := sf.Tag.Lookup("default"); ok {
@@ -212,6 +283,20 @@ func (p *Plan) Bind(dst reflect.Value, src Source) error {
 			})
 		}
 	}
+	if p.StrictQuery {
+		if query == nil {
+			query = src.QueryValues()
+		}
+		for name := range query {
+			if _, ok := p.queryParams[name]; !ok {
+				errs = append(errs, validate.FieldError{
+					Field:   "query." + name,
+					Rule:    "unknown",
+					Message: fmt.Sprintf("unknown query parameter %q", name),
+				})
+			}
+		}
+	}
 	if len(errs) > 0 {
 		return errs
 	}
@@ -221,6 +306,18 @@ func (p *Plan) Bind(dst reflect.Value, src Source) error {
 func (pr *Param) set(fv reflect.Value, values []string) error {
 	if !pr.multi {
 		return pr.decode(fv, values[0])
+	}
+	if pr.comma {
+		var parts []string
+		for _, v := range values {
+			for _, part := range strings.Split(v, ",") {
+				if part == "" {
+					continue
+				}
+				parts = append(parts, part)
+			}
+		}
+		values = parts
 	}
 	s := reflect.MakeSlice(fv.Type(), len(values), len(values))
 	for i, v := range values {
@@ -237,7 +334,42 @@ type decoder func(v reflect.Value, s string) error
 var (
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 	durationType        = reflect.TypeFor[time.Duration]()
+	timeType            = reflect.TypeFor[time.Time]()
 )
+
+// layoutDecoder parses time.Time fields (or pointers to them) with an
+// explicit Go reference layout from the `layout` tag, e.g.
+// `query:"day" layout:"2006-01-02"`.
+func layoutDecoder(ft reflect.Type, layout string) (decoder, error) {
+	if layout == "" {
+		return nil, fmt.Errorf("empty layout option")
+	}
+	if ft.Kind() == reflect.Pointer {
+		elem, err := layoutDecoder(ft.Elem(), layout)
+		if err != nil {
+			return nil, err
+		}
+		return func(v reflect.Value, s string) error {
+			nv := reflect.New(ft.Elem())
+			if err := elem(nv.Elem(), s); err != nil {
+				return err
+			}
+			v.Set(nv)
+			return nil
+		}, nil
+	}
+	if ft != timeType {
+		return nil, fmt.Errorf("layout option needs a time.Time field, got %s", ft)
+	}
+	return func(v reflect.Value, s string) error {
+		tm, err := time.Parse(layout, s)
+		if err != nil {
+			return fmt.Errorf("must match time layout %q", layout)
+		}
+		v.Set(reflect.ValueOf(tm))
+		return nil
+	}, nil
+}
 
 func decoderFor(t reflect.Type) (decoder, error) {
 	if t.Kind() == reflect.Pointer {

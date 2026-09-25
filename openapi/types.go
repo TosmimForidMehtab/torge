@@ -193,9 +193,27 @@ type Schema struct {
 	AllOf                []*Schema          `json:"allOf,omitempty"`
 	OneOf                []*Schema          `json:"oneOf,omitempty"`
 	AnyOf                []*Schema          `json:"anyOf,omitempty"`
+	Discriminator        *Discriminator     `json:"discriminator,omitempty"`
 }
 
 // SchemaProvider can be implemented by types that need a hand-written schema.
 type SchemaProvider interface {
 	OpenAPISchema() *Schema
+}
+
+// Discriminator selects among oneOf/anyOf subschemas by an object property.
+// Reference it from a SchemaProvider for polymorphic responses:
+//
+//	func (Payment) OpenAPISchema() *openapi.Schema {
+//		return &openapi.Schema{
+//			OneOf: []*openapi.Schema{
+//				{Ref: "#/components/schemas/CardPayment"},
+//				{Ref: "#/components/schemas/BankPayment"},
+//			},
+//			Discriminator: &openapi.Discriminator{PropertyName: "method"},
+//		}
+//	}
+type Discriminator struct {
+	PropertyName string            `json:"propertyName"`
+	Mapping      map[string]string `json:"mapping,omitempty"`
 }

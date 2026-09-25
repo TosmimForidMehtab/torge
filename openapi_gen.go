@@ -205,9 +205,14 @@ func (a *App) buildOpenAPI() {
 			}
 		}
 		if bodySchema != nil {
+			bodyContentType := firstNonEmpty(rc.doc.bodyContentType, "application/json")
+			media := &openapi.MediaType{Schema: bodySchema}
+			if rc.doc.hasBodyExample {
+				media.Example = rc.doc.bodyExample
+			}
 			op.RequestBody = &openapi.RequestBody{
 				Required: bodyType.Kind() != reflect.Pointer,
-				Content:  map[string]*openapi.MediaType{"application/json": {Schema: bodySchema}},
+				Content:  map[string]*openapi.MediaType{bodyContentType: media},
 			}
 		}
 
@@ -234,7 +239,39 @@ func (a *App) buildOpenAPI() {
 			} else if status >= 400 {
 				or.Content = map[string]*openapi.MediaType{"application/json": {Schema: errRef}}
 			}
-			op.Responses[strconv.Itoa(status)] = or
+			if resp.hasExample {
+				if or.Content == nil {
+					or.Content = map[string]*openapi.MediaType{}
+				}
+				media := or.Content["application/json"]
+				if media == nil {
+					media = &openapi.MediaType{}
+					or.Content["application/json"] = media
+				}
+				media.Example = resp.example
+			}
+			key := strconv.Itoa(status)
+			if existing, dup := op.Responses[key]; dup && resp.typ == nil {
+				// An example-only (or bodyless) entry for an already
+				// documented status enriches it instead of replacing it,
+				// so ResponseExample on a typed success keeps its schema.
+				if resp.description != "" {
+					existing.Description = resp.description
+				}
+				if resp.hasExample {
+					if existing.Content == nil {
+						existing.Content = map[string]*openapi.MediaType{}
+					}
+					media := existing.Content["application/json"]
+					if media == nil {
+						media = &openapi.MediaType{}
+						existing.Content["application/json"] = media
+					}
+					media.Example = resp.example
+				}
+				continue
+			}
+			op.Responses[key] = or
 		}
 		if len(op.Responses) == 0 {
 			op.Responses[strconv.Itoa(success)] = &openapi.Response{Description: http.StatusText(success)}

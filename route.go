@@ -40,22 +40,27 @@ type routeConfig struct {
 
 // operationDoc holds OpenAPI metadata for a route.
 type operationDoc struct {
-	hidden        bool
-	summary       string
-	description   string
-	operationID   string
-	tags          []string
-	deprecated    bool
-	security      *[]openapi.SecurityRequirement
-	successStatus int
-	input         reflect.Type
-	body          reflect.Type
-	responses     map[int]responseDoc
+	hidden          bool
+	summary         string
+	description     string
+	operationID     string
+	tags            []string
+	deprecated      bool
+	security        *[]openapi.SecurityRequirement
+	successStatus   int
+	input           reflect.Type
+	body            reflect.Type
+	bodyContentType string
+	bodyExample     any
+	hasBodyExample  bool
+	responses       map[int]responseDoc
 }
 
 type responseDoc struct {
 	description string
 	typ         reflect.Type
+	example     any
+	hasExample  bool
 }
 
 // RouteOption configures a route or, when passed to Group, every route of the
@@ -104,6 +109,28 @@ func Tags(tags ...string) RouteOption {
 // Deprecated marks the operation as deprecated in OpenAPI.
 func Deprecated() RouteOption {
 	return routeOptionFunc(func(r *routeConfig) { r.doc.deprecated = true })
+}
+
+// Sunset marks the route as deprecated and announces its retirement with
+// RFC 8594 Deprecation/Sunset response headers. date is the retirement date
+// in IMF-fixdate form ("Mon, 02 Jan 2006 15:04:05 GMT"); an empty date sends
+// only the Deprecation header. It applies to groups as well, so a whole
+// version can sunset at once:
+//
+//	legacy := app.Version("v0", torge.Sunset("Mon, 01 Jun 2026 00:00:00 GMT"))
+func Sunset(date string) RouteOption {
+	return routeOptionFunc(func(r *routeConfig) {
+		r.doc.deprecated = true
+		r.middleware = append(r.middleware, Middleware(func(next Handler) Handler {
+			return func(c *Context) error {
+				c.Header("Deprecation", "true")
+				if date != "" {
+					c.Header("Sunset", date)
+				}
+				return next(c)
+			}
+		}))
+	})
 }
 
 // Hidden excludes the route from the OpenAPI document.
@@ -166,6 +193,64 @@ func Responds(status int, description string) RouteOption {
 	})
 }
 
+// RequestContentType overrides the documented request body media type
+// (default application/json). Use it with Body for uploads:
+//
+//	app.POST("/avatar", uploadAvatar,
+//		torge.Body[AvatarForm](),
+//		torge.RequestContentType("multipart/form-data"))
+//
+// File parts are declared with `format:"binary"` fields, e.g.
+// `File string `json:"file" format:"binary"“.
+func RequestContentType(contentType string) RouteOption {
+	return routeOptionFunc(func(r *routeConfig) { r.doc.bodyContentType = contentType })
+}
+
+// RequestExample documents an example request body.
+func RequestExample(example any) RouteOption {
+	return routeOptionFunc(func(r *routeConfig) { r.doc.bodyExample, r.doc.hasBodyExample = example, true })
+}
+
+// ResponseExample documents an example response body for a status code. It
+// pairs with Returns and Responds:
+//
+//	torge.Post(api, "/users", svc.Create,
+//		torge.Status(201),
+//		torge.Returns[User](201, "Created"),
+//		torge.ResponseExample(201, User{ID: "1", Name: "Ada"}))
+func ResponseExample(status int, example any) RouteOption {
+	return routeOptionFunc(func(r *routeConfig) {
+		if r.doc.responses == nil {
+			r.doc.responses = make(map[int]responseDoc)
+		}
+		d := r.doc.responses[status]
+		d.example, d.hasExample = example, true
+		r.doc.responses[status] = d
+	})
+}
+
+// Scopes documents the OAuth2 scopes required by the route, merging into
+// security declared with Security on the route or its groups:
+//
+//	api := app.Group("/v1", torge.Security("oauth"))
+//	api.GET("/me", getMe, torge.Scopes("oauth", "profile:read"))
+func Scopes(scheme string, scopes ...string) RouteOption {
+	return routeOptionFunc(func(r *routeConfig) {
+		if r.doc.security == nil {
+			reqs := []openapi.SecurityRequirement{{scheme: scopes}}
+			r.doc.security = &reqs
+			return
+		}
+		for i, req := range *r.doc.security {
+			if _, ok := req[scheme]; ok {
+				(*r.doc.security)[i][scheme] = scopes
+				return
+			}
+		}
+		*r.doc.security = append(*r.doc.security, openapi.SecurityRequirement{scheme: scopes})
+	})
+}
+
 // RouteInfo describes a registered route for introspection and tooling.
 type RouteInfo struct {
 	Method     string   `json:"method"`
@@ -175,6 +260,7 @@ type RouteInfo struct {
 	Middleware []string `json:"middleware,omitempty"`
 	Module     string   `json:"module,omitempty"`
 	Location   string   `json:"location,omitempty"`
+	Deprecated bool     `json:"deprecated,omitempty"`
 }
 
 // resolve applies group options (outermost group first) and then the route's
@@ -204,12 +290,13 @@ func (r *route) info() RouteInfo {
 		cfg = r.resolve()
 	}
 	info := RouteInfo{
-		Method:   r.method,
-		Path:     r.path,
-		Name:     cfg.name,
-		Handler:  firstNonEmpty(r.handlerFn, funcName(r.handler)),
-		Module:   r.module,
-		Location: r.location,
+		Method:     r.method,
+		Path:       r.path,
+		Name:       cfg.name,
+		Handler:    firstNonEmpty(r.handlerFn, funcName(r.handler)),
+		Module:     r.module,
+		Location:   r.location,
+		Deprecated: cfg.doc.deprecated,
 	}
 	for _, m := range cfg.middleware {
 		info.Middleware = append(info.Middleware, funcName(m))

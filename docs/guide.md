@@ -216,7 +216,9 @@ if err := c.Bind(&in); err != nil {
 ```
 
 - The body decodes into a field named `Body`, or into the struct itself if there is none. Parameters are bound **after** the body, so a body can never overwrite a path parameter.
-- Parameter types: strings, numbers, booleans, `time.Duration`, `time.Time` and anything implementing `encoding.TextUnmarshaler`, plus pointers and slices of them.
+- Parameter types: strings, numbers, booleans, `time.Duration`, `time.Time` and anything implementing `encoding.TextUnmarshaler`, plus pointers and slices of them. Repeated parameters fill slices; `query:"tag,comma"` additionally splits single values on commas.
+- `time.Time` parameters parse RFC 3339 by default; `layout:"2006-01-02"` selects another Go reference layout.
+- Embed `torge.Strict` to reject unknown JSON fields and undeclared query parameters (a `422` naming them). Multipart form fields pair with `upload.Stream`: bind its returned values with `torge.BindFormValues`.
 - `c.BindJSON(&v)` decodes and validates a required body only.
 
 Validation rules (`validate` tag): `required`, `omitempty`, `min`, `max`,

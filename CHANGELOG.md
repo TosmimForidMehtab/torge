@@ -9,6 +9,35 @@ entries are marked with their module.
 
 ## [Unreleased]
 
+### Added
+
+- List ergonomics: embeddable `PageParams` (defaults `page=1`,
+  `page_size=20`, bounds `1..100`), `Page[T]` envelope with `NewPage`,
+  `HasNext`/`HasPrev`, cursor pagination (`CursorParams`, `CursorPage[T]`),
+  allow-list `ParseSort`, embeddable `Search`, and RFC 8288
+  `Context.SetPageLinks`. Binding, validation and OpenAPI derive from the
+  same structs.
+- Express-style request/response helpers: `Send` (type-dispatched responses),
+  `Format`/`Accepts`/`Is` (q-value content negotiation with shorthands),
+  `Location`, `Links`, `Type`, `ClearCookie`, `Hostname`, `Secure`, `XHR`,
+  plus the `NOT_ACCEPTABLE` error code and `NotAcceptable` constructor.
+- Success and error contracts: `Result[T]` envelope (`NewResult`, `WithMeta`)
+  and opt-in RFC 9457 problem details (`ProblemBody`, `NewProblem`,
+  `ProblemErrorHandler` via `WithErrorHandler`); the default error envelope
+  is unchanged.
+- Binding: `Strict` marker input (unknown JSON fields rejected, undeclared
+  query parameters fail with 422), `query:"tag,comma"` splitting,
+  `layout` tag for `time.Time` parameters, and `BindFormValues` for
+  multipart form fields (pairs with `upload.Stream`).
+- OpenAPI: `RequestContentType` (document uploads with `format:"binary"`
+  fields), `RequestExample`/`ResponseExample` (example-only entries enrich
+  rather than replace documented schemas), `Scopes` merging into `Security`,
+  and `openapi.Discriminator` for `oneOf` polymorphism via `SchemaProvider`.
+- Versioning: `Group.Version` (`/api/<version>` plus tag), `Sunset` route
+  option (OpenAPI deprecated plus `Deprecation`/`Sunset` headers, works on
+  groups), `middleware.APIVersion` with `RequestVersion` (`Accept-Version`
+  negotiation, latest by default), and `RouteInfo.Deprecated`.
+
 ## [0.2.0] - 2026-09-26
 
 ### Changed
