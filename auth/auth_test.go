@@ -87,3 +87,34 @@ func TestRequirePolicy(t *testing.T) {
 	tc.GET("/users/u1").BearerToken("admin-token").Do().ExpectStatus(204)
 	tc.GET("/users/u2").BearerToken("admin-token").Do().ExpectStatus(403)
 }
+
+func TestConstantTimeCredentialChecks(t *testing.T) {
+	ctx := context.Background()
+	for i := range 2 { // two verifiers, each with its own random key
+		verify := auth.BasicUsers(map[string]string{"alice": "s3cret", "bob": ""})
+		if p, err := verify(ctx, "alice", "s3cret"); err != nil || p.ID() != "alice" {
+			t.Fatalf("verifier %d: valid credentials rejected: %v", i, err)
+		}
+		if _, err := verify(ctx, "bob", ""); err != nil {
+			t.Fatalf("verifier %d: empty configured password must still match exactly", i)
+		}
+		for _, bad := range [][2]string{
+			{"alice", "s3cre"}, {"alice", "s3cret!"}, {"alice", ""}, {"alice", "S3CRET"},
+			{"s3cret", "alice"}, {"alic", "s3cret"}, {"bob", "x"}, {"", ""},
+		} {
+			if _, err := verify(ctx, bad[0], bad[1]); !errors.Is(err, auth.ErrInvalidCredentials) {
+				t.Errorf("verifier %d: %q/%q must be rejected, got %v", i, bad[0], bad[1], err)
+			}
+		}
+	}
+
+	lookup := auth.StaticKeys(map[string]torge.Principal{"key-123": &auth.User{Subject: "svc"}})
+	if p, err := lookup(ctx, "key-123"); err != nil || p.ID() != "svc" {
+		t.Fatalf("valid key rejected: %v", err)
+	}
+	for _, bad := range []string{"key-12", "key-1234", "", "KEY-123"} {
+		if _, err := lookup(ctx, bad); !errors.Is(err, auth.ErrInvalidCredentials) {
+			t.Errorf("key %q must be rejected, got %v", bad, err)
+		}
+	}
+}

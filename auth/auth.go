@@ -20,6 +20,8 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -195,21 +197,22 @@ func (a apiKey) Authenticate(c *torge.Context) (torge.Principal, error) {
 }
 
 // StaticKeys returns an API key lookup over a fixed key set. Keys are
-// compared in constant time on their SHA-256 digests.
+// compared in constant time (see newComparer).
 func StaticKeys(keys map[string]torge.Principal) func(context.Context, string) (torge.Principal, error) {
+	tag := newComparer()
 	type entry struct {
-		digest [32]byte
-		p      torge.Principal
+		tag []byte
+		p   torge.Principal
 	}
 	entries := make([]entry, 0, len(keys))
 	for k, p := range keys {
-		entries = append(entries, entry{sha256.Sum256([]byte(k)), p})
+		entries = append(entries, entry{tag(k), p})
 	}
 	return func(_ context.Context, key string) (torge.Principal, error) {
-		d := sha256.Sum256([]byte(key))
+		t := tag(key)
 		var found torge.Principal
 		for _, e := range entries {
-			if subtle.ConstantTimeCompare(d[:], e.digest[:]) == 1 {
+			if subtle.ConstantTimeCompare(t, e.tag) == 1 {
 				found = e.p
 			}
 		}
@@ -249,23 +252,41 @@ func (b basic) Challenge() string {
 }
 
 // BasicUsers returns a verifier over fixed credentials, compared in constant
-// time.
+// time (see newComparer).
 func BasicUsers(users map[string]string) BasicVerifier {
-	type entry struct{ user, pass [32]byte }
+	tag := newComparer()
+	type entry struct{ user, pass []byte }
 	entries := make([]entry, 0, len(users))
 	for u, p := range users {
-		entries = append(entries, entry{sha256.Sum256([]byte(u)), sha256.Sum256([]byte(p))})
+		entries = append(entries, entry{tag(u), tag(p)})
 	}
 	return func(_ context.Context, username, password string) (torge.Principal, error) {
-		u, p := sha256.Sum256([]byte(username)), sha256.Sum256([]byte(password))
+		u, p := tag(username), tag(password)
 		ok := 0
 		for _, e := range entries {
-			ok |= subtle.ConstantTimeCompare(u[:], e.user[:]) & subtle.ConstantTimeCompare(p[:], e.pass[:])
+			ok |= subtle.ConstantTimeCompare(u, e.user) & subtle.ConstantTimeCompare(p, e.pass)
 		}
 		if ok != 1 {
 			return nil, ErrInvalidCredentials
 		}
 		return &User{Subject: username}, nil
+	}
+}
+
+// newComparer returns a function mapping a secret to a fixed-length tag for
+// constant-time comparison: HMAC-SHA256 under a random key created for this
+// comparer. Equal inputs give equal tags; comparing tags instead of the raw
+// values takes the same time wherever, and whether, the inputs differ, and
+// does not reveal their length. The key never leaves the process and tags are
+// never stored or exposed, so this is not password storage; secrets that
+// must be stored should use a password hashing function instead.
+func newComparer() func(string) []byte {
+	key := make([]byte, 32)
+	_, _ = rand.Read(key) // crypto/rand.Read never fails; it aborts the program instead
+	return func(s string) []byte {
+		m := hmac.New(sha256.New, key)
+		m.Write([]byte(s))
+		return m.Sum(nil)
 	}
 }
 

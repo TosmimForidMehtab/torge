@@ -134,14 +134,25 @@ Changes are evaluated against these principles (see the
 
 Each module is versioned independently with [semantic versioning](https://semver.org).
 
-1. Update [CHANGELOG.md](CHANGELOG.md) and commit.
-2. Tag the core: `git tag -a v0.X.Y -m "Torge v0.X.Y" && git push origin v0.X.Y`.
+Pushing a tag runs the [release workflow](.github/workflows/release.yml),
+which validates the tag, tests the tagged module, publishes the GitHub
+release (with prebuilt CLI binaries for core releases) and notifies the Go
+module proxy.
+
+1. Move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under a new
+   `## [X.Y.Z] - YYYY-MM-DD` heading and commit. Core releases fail without
+   this section, since it becomes the release notes.
+2. Tag the core and push the tag:
+   `git tag -a v0.X.Y -m "Torge v0.X.Y" && git push origin v0.X.Y`.
 3. If a contrib module needs the new core, bump its requirement
    (`cd contrib/<name> && GOWORK=off go get github.com/TosmimForidMehtab/torge@v0.X.Y && go mod tidy`),
    commit and push.
-4. Tag changed contrib modules with their directory as a prefix:
-   `git tag -a contrib/<name>/v0.X.Y -m "contrib/<name> v0.X.Y"` and push the tag.
-5. Create a GitHub release for each tag with the changelog entry.
+4. Tag changed contrib modules with their directory as a prefix and push the
+   tag: `git tag -a contrib/<name>/v0.X.Y -m "contrib/<name> v0.X.Y" && git push origin contrib/<name>/v0.X.Y`.
+   Their release notes are generated from commits since the previous release
+   of the same module.
+
+A tag with a suffix such as `v0.3.0-rc.1` is published as a pre-release.
 
 ## License
 

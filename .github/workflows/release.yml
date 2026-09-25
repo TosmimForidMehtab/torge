@@ -1,0 +1,209 @@
+name: Release
+
+# Pushing a version tag publishes a GitHub release:
+#   vX.Y.Z                  core module (release notes from CHANGELOG.md,
+#                           plus prebuilt torge CLI binaries)
+#   contrib/<name>/vX.Y.Z   a contrib module (release notes generated from
+#                           the commits since its previous release)
+# Tags with a pre-release suffix (v1.2.0-rc.1) create pre-releases.
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "contrib/*/v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      dir: ${{ steps.tag.outputs.dir }}
+      module: ${{ steps.tag.outputs.module }}
+      version: ${{ steps.tag.outputs.version }}
+      core: ${{ steps.tag.outputs.core }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Parse and validate tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          semver='v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
+          if [[ "$TAG" =~ ^($semver)$ ]]; then
+            dir=.
+            version="${BASH_REMATCH[1]}"
+            core=true
+          elif [[ "$TAG" =~ ^contrib/([a-z0-9]+)/($semver)$ ]]; then
+            dir="contrib/${BASH_REMATCH[1]}"
+            version="${BASH_REMATCH[2]}"
+            core=false
+          else
+            echo "::error::Tag '$TAG' must be vX.Y.Z or contrib/<name>/vX.Y.Z"
+            exit 1
+          fi
+          if [ ! -f "$dir/go.mod" ]; then
+            echo "::error::Tag '$TAG' refers to '$dir', which is not a module in this repository"
+            exit 1
+          fi
+          module=$(cd "$dir" && GOWORK=off go list -m)
+
+          if [ "$core" = true ]; then
+            if ! grep -qF "## [${version#v}]" CHANGELOG.md; then
+              echo "::error::CHANGELOG.md has no '## [${version#v}]' section; add release notes before tagging"
+              exit 1
+            fi
+          elif grep -q '^replace' "$dir/go.mod"; then
+            echo "::error::$dir/go.mod contains replace directives; published modules must require released versions"
+            exit 1
+          fi
+
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          {
+            echo "dir=$dir"
+            echo "module=$module"
+            echo "version=$version"
+            echo "core=$core"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $module $version (pre-release: $prerelease)"
+
+  verify:
+    name: Verify ${{ needs.validate.outputs.dir }}
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+
+      # Contrib modules are checked outside the workspace, exactly as users
+      # get them: against the core version their go.mod requires.
+      - name: Vet and test the tagged module
+        working-directory: ${{ needs.validate.outputs.dir }}
+        env:
+          GOWORK: ${{ needs.validate.outputs.core == 'true' && 'auto' || 'off' }}
+        run: |
+          go mod tidy -diff
+          go vet ./...
+          go test -race -count=1 ./...
+
+  release:
+    name: Publish release
+    needs: [validate, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      MODULE: ${{ needs.validate.outputs.module }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      CORE: ${{ needs.validate.outputs.core }}
+      PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build CLI binaries
+        if: needs.validate.outputs.core == 'true'
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            name="torge_${VERSION#v}_${os}_${arch}"
+            ext=""
+            [ "$os" = windows ] && ext=".exe"
+            mkdir -p "build/$name"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "build/$name/torge$ext" ./cmd/torge
+            cp LICENSE README.md "build/$name/"
+            if [ "$os" = windows ]; then
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            else
+              tar -C build -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum * > checksums.txt)
+          ls -l dist
+
+      - name: Write release notes
+        run: |
+          {
+            echo "Install with:"
+            echo
+            echo '```sh'
+            echo "go get $MODULE@$VERSION"
+            echo '```'
+            echo
+          } > notes.md
+          if [ "$CORE" = true ]; then
+            # The CHANGELOG.md section for this version, without its heading.
+            awk -v heading="## [${VERSION#v}]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md >> notes.md
+            echo '```sh' >> notes.md
+            echo "go install $MODULE/cmd/torge@$VERSION   # optional CLI" >> notes.md
+            echo '```' >> notes.md
+          fi
+          cat notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The previous release of the same module, for generated notes.
+          if [ "$CORE" = true ]; then pattern='v*'; else pattern="${TAG%/v*}/v*"; fi
+          previous=$(git tag -l "$pattern" --sort=-v:refname | awk -v tag="$TAG" 'found { print; exit } $0 == tag { found = 1 }')
+
+          args=(--verify-tag --title "$MODULE $VERSION" --notes-file notes.md)
+          [ "$PRERELEASE" = true ] && args+=(--prerelease)
+          if [ "$CORE" != true ]; then
+            args+=(--generate-notes)
+            [ -n "$previous" ] && args+=(--notes-start-tag "$previous")
+          fi
+          if [ "$CORE" = true ]; then
+            gh release create "$TAG" "${args[@]}" dist/*
+          else
+            gh release create "$TAG" "${args[@]}"
+          fi
+
+      - name: Announce the version to the Go module proxy
+        run: |
+          # Fetching through proxy.golang.org caches the version and lists it
+          # on pkg.go.dev. The proxy can take a moment to see a new tag.
+          cd "$RUNNER_TEMP"
+          for attempt in 1 2 3 4 5 6; do
+            if GOWORK=off GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "$MODULE@$VERSION"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::The Go module proxy has not seen $MODULE@$VERSION yet; it will pick it up on the first request."

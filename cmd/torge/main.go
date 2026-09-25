@@ -20,11 +20,24 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
+// version is set by release builds with -ldflags "-X main.version=...".
 var version = "dev"
+
+// cliVersion returns the stamped version, or the module version recorded by
+// "go install ...@vX.Y.Z", or "dev" for local builds.
+func cliVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
+}
 
 const usage = `Torge CLI
 
@@ -61,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stdout, usage)
 		return nil
 	case "version":
-		fmt.Fprintln(stdout, "torge", version)
+		fmt.Fprintln(stdout, "torge", cliVersion())
 		return nil
 	case "new":
 		return cmdNew(args[1:], stdout)

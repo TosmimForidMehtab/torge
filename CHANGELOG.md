@@ -9,6 +9,23 @@ entries are marked with their module.
 
 ## [Unreleased]
 
+### Added
+
+- Release workflow: pushing a version tag publishes a GitHub release with
+  prebuilt `torge` CLI binaries for Linux, macOS and Windows.
+
+### Changed
+
+- `auth.BasicUsers` and `auth.StaticKeys` compare credentials using
+  HMAC-SHA256 tags under a random per-verifier key instead of unkeyed SHA-256
+  digests. Comparison stays constant-time and length-hiding; no behavior
+  change for callers.
+
+### Fixed
+
+- `torge version` printed `dev` when installed with `go install`; it now
+  prints the installed module version.
+
 ## [0.1.1] - 2026-09-25
 
 ### Changed
