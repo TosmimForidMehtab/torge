@@ -10,10 +10,26 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/TosmimForidMehtab/torge/internal/binding"
 	"github.com/TosmimForidMehtab/torge/validate"
 )
+
+// Strict is an embedded marker enabling strict binding for an input type.
+// Strict inputs reject JSON bodies with unknown fields and fail requests
+// carrying undeclared query parameters with a 422 listing them:
+//
+//	type ListUsers struct {
+//		torge.Strict
+//		Q string `query:"q" validate:"max=100"`
+//	}
+//
+// It applies to Context.Bind, Context.BindJSON and typed handlers alike.
+// Slice fields additionally accept `query:"tag,comma"` to split single
+// values on commas, and time.Time fields accept `layout:"2006-01-02"` to
+// parse non-RFC3339 timestamps.
+type Strict = binding.Strict
 
 // Bind populates dst (a pointer to a struct) from the request and validates
 // it:
@@ -43,9 +59,10 @@ func (c *Context) Bind(dst any) error {
 }
 
 // BindJSON decodes the request body into dst and validates it. An empty body
-// is rejected.
+// is rejected. When dst is a struct embedding Strict, unknown JSON fields
+// are rejected.
 func (c *Context) BindJSON(dst any) error {
-	present, err := c.decodeBody(dst)
+	present, err := c.decodeBody(dst, c.strictBody(dst))
 	if err != nil {
 		return err
 	}
@@ -53,6 +70,61 @@ func (c *Context) BindJSON(dst any) error {
 		return BadRequest(CodeBadRequest, "Request body is required")
 	}
 	return c.Validate(dst)
+}
+
+// BindFormValues binds values (form fields, for example the url.Values
+// returned by upload.Stream alongside streamed files) into dst's
+// query-tagged fields and validates the result with the application's
+// validator. Path, header and cookie parameters are left at their zero
+// values. Unknown values fail only when dst embeds Strict.
+func (c *Context) BindFormValues(dst any, values url.Values) error {
+	rv := reflect.ValueOf(dst)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("torge: BindFormValues requires a non-nil pointer to a struct, got %T", dst)
+	}
+	plan, err := binding.PlanFor(rv.Elem().Type())
+	if err != nil {
+		return err
+	}
+	if err := plan.Bind(rv.Elem(), queryValuesSource{values}); err != nil {
+		return AsError(err)
+	}
+	return c.Validate(dst)
+}
+
+// queryValuesSource binds url.Values as the query location.
+type queryValuesSource struct{ values url.Values }
+
+func (s queryValuesSource) PathValue(string) (string, bool) { return "", false }
+func (s queryValuesSource) QueryValues() url.Values         { return s.values }
+func (s queryValuesSource) HeaderValues(string) []string    { return nil }
+func (s queryValuesSource) CookieValue(string) (string, bool) {
+	return "", false
+}
+
+// strictBodyCache remembers per input type whether strict bodies apply, so
+// BindJSON pays no reflection or plan lookup on the hot path after the
+// first call for a type.
+var strictBodyCache sync.Map // reflect.Type -> bool
+
+// strictBody reports whether dst's binding plan requires strict bodies. It
+// stays off the hot path: custom serializers ignore strictness, and the
+// answer is cached per type.
+func (c *Context) strictBody(dst any) bool {
+	if _, ok := c.serializer().(JSONSerializer); !ok {
+		return false
+	}
+	t := reflect.TypeOf(dst)
+	if t == nil || t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
+		return false
+	}
+	if v, ok := strictBodyCache.Load(t); ok {
+		return v.(bool)
+	}
+	plan, err := binding.PlanFor(t.Elem())
+	strict := err == nil && plan.StrictBody
+	strictBodyCache.Store(t, strict)
+	return strict
 }
 
 // Validate validates v with the application's validator, converting failures
@@ -81,11 +153,13 @@ func (c *Context) bindPlan(dst reflect.Value, plan *binding.Plan) error {
 		} else {
 			target = dst.FieldByIndex(plan.BodyIndex).Addr().Interface()
 		}
-		if _, err := c.decodeBody(target); err != nil {
+		if _, err := c.decodeBody(target, plan.StrictBody); err != nil {
 			return err
 		}
 	}
-	if len(plan.Params) > 0 {
+	// The strict query check runs even when the input declares no
+	// parameters: that is exactly when every query parameter is undeclared.
+	if len(plan.Params) > 0 || plan.StrictQuery {
 		if err := plan.Bind(dst, contextSource{c}); err != nil {
 			return AsError(err)
 		}
@@ -94,12 +168,20 @@ func (c *Context) bindPlan(dst reflect.Value, plan *binding.Plan) error {
 }
 
 // decodeBody decodes the body into dst. It reports whether a body was present.
-func (c *Context) decodeBody(dst any) (bool, error) {
+// Strict bodies reject unknown JSON fields; strictness is a no-op for custom
+// serializers.
+func (c *Context) decodeBody(dst any, strict bool) (bool, error) {
 	r := c.req
 	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
 		return false, nil
 	}
 	s := c.serializer()
+	if strict {
+		if js, ok := s.(JSONSerializer); ok {
+			js.DisallowUnknownFields = true
+			s = js
+		}
+	}
 	if ct := r.Header.Get("Content-Type"); ct != "" && !contentTypeMatches(ct, s.ContentType()) {
 		return false, NewError(http.StatusUnsupportedMediaType, CodeUnsupportedMedia,
 			fmt.Sprintf("Content-Type %q is not supported; send %s", ct, baseMediaType(s.ContentType())))
