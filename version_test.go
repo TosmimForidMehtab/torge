@@ -28,6 +28,15 @@ func TestSunsetHeaders(t *testing.T) {
 	}
 }
 
+func TestSunsetInvalidDatePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for invalid Sunset date")
+		}
+	}()
+	torge.Sunset("next Friday")
+}
+
 func TestVersionGroup(t *testing.T) {
 	app := torgetest.NewApp(t)
 	app.OpenAPI(torge.OpenAPIConfig{Info: openapi.Info{Title: "T", Version: "1"}})

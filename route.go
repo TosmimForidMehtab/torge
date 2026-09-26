@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/TosmimForidMehtab/torge/openapi"
@@ -114,11 +115,20 @@ func Deprecated() RouteOption {
 // Sunset marks the route as deprecated and announces its retirement with
 // RFC 8594 Deprecation/Sunset response headers. date is the retirement date
 // in IMF-fixdate form ("Mon, 02 Jan 2006 15:04:05 GMT"); an empty date sends
-// only the Deprecation header. It applies to groups as well, so a whole
-// version can sunset at once:
+// only the Deprecation header. The date is validated at registration, so a
+// typo fails fast instead of shipping a bogus header. It applies to groups
+// as well, so a whole version can sunset at once:
 //
 //	legacy := app.Version("v0", torge.Sunset("Mon, 01 Jun 2026 00:00:00 GMT"))
 func Sunset(date string) RouteOption {
+	if date != "" {
+		if _, err := http.ParseTime(date); err != nil {
+			panic(&Diagnostic{
+				Code: DiagInvalidConfig, What: "invalid Sunset date " + strconv.Quote(date),
+				Why: err.Error(), Fix: `use IMF-fixdate, e.g. "Mon, 01 Jun 2026 00:00:00 GMT"`,
+			})
+		}
+	}
 	return routeOptionFunc(func(r *routeConfig) {
 		r.doc.deprecated = true
 		r.middleware = append(r.middleware, Middleware(func(next Handler) Handler {
@@ -200,8 +210,8 @@ func Responds(status int, description string) RouteOption {
 //		torge.Body[AvatarForm](),
 //		torge.RequestContentType("multipart/form-data"))
 //
-// File parts are declared with `format:"binary"` fields, e.g.
-// `File string `json:"file" format:"binary"“.
+// File parts are declared with format:"binary" fields, for example a File
+// string field tagged json:"file" format:"binary".
 func RequestContentType(contentType string) RouteOption {
 	return routeOptionFunc(func(r *routeConfig) { r.doc.bodyContentType = contentType })
 }

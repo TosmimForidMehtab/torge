@@ -2,6 +2,7 @@ package torge
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -36,15 +37,21 @@ const (
 )
 
 // PageParams declares offset-pagination query parameters. Embed it in a
-// handler input; Context.Bind applies defaults and validates bounds.
+// handler input; Context.Bind applies defaults and validates bounds. Page
+// is capped so adversarial values cannot push Offset past what a database
+// accepts; Offset additionally saturates instead of overflowing.
 type PageParams struct {
-	Page     int `query:"page" default:"1" validate:"min=1"`
+	Page     int `query:"page" default:"1" validate:"min=1,max=1000000"`
 	PageSize int `query:"page_size" default:"20" validate:"min=1,max=100"`
 }
 
+// maxInt is the largest int, used to saturate Offset.
+const maxInt = int(^uint(0) >> 1)
+
 // Offset returns the number of items to skip for the current page. Values
-// below the valid range are clamped so direct construction cannot produce a
-// negative offset.
+// below the valid range are clamped, and huge pages saturate at maxInt
+// instead of overflowing negative, so the result is always safe for OFFSET
+// clauses.
 func (p PageParams) Offset() int {
 	page, size := p.Page, p.PageSize
 	if page < 1 {
@@ -52,6 +59,10 @@ func (p PageParams) Offset() int {
 	}
 	if size < 1 {
 		size = DefaultPageSize
+	}
+	// Compare before multiplying: the product itself may overflow.
+	if int64(page-1) > int64(maxInt)/int64(size) {
+		return maxInt
 	}
 	return (page - 1) * size
 }
@@ -184,9 +195,11 @@ type Search struct {
 }
 
 // SetPageLinks sets an RFC 8288 Link header for an offset-paginated resource
-// at path with first/prev/next/last relations, preserving the page size.
-// Clients that understand links can follow pages without building URLs;
-// others can ignore the header. Call it before writing the response body.
+// at path with first/prev/next/last relations. The current request's query
+// parameters are preserved and only page/page_size are overridden, so
+// following next keeps filters and search terms. Clients that understand
+// links can follow pages without building URLs; others can ignore the
+// header. Call it before writing the response body.
 func (c *Context) SetPageLinks(path string, params PageParams, total int) {
 	size := params.Limit()
 	page := params.Page
@@ -201,8 +214,12 @@ func (c *Context) SetPageLinks(path string, params PageParams, total int) {
 	if last < 1 {
 		last = 1
 	}
+	base := maps.Clone(c.QueryValues())
 	link := func(p int, rel string) string {
-		q := url.Values{}
+		q := base
+		if q == nil {
+			q = url.Values{}
+		}
 		q.Set("page", strconv.Itoa(p))
 		q.Set("page_size", strconv.Itoa(size))
 		u := url.URL{Path: path, RawQuery: q.Encode()}

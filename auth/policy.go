@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/TosmimForidMehtab/torge"
 )
@@ -80,28 +81,56 @@ func Any(policies ...Policy) Policy {
 	}
 }
 
-// Not returns a Policy that inverts policy: it denies when policy allows
-// and allows when policy denies. A nil policy counts as denying, so
-// Not(nil) allows.
+// Not returns a Policy that inverts policy, failing closed. It allows only
+// when policy produces an explicit denial: a *torge.Error with status 403
+// or one of this package's denial sentinels. Every other error —
+// operational failures, other statuses such as 401, plain errors — passes
+// through, so it still denies. A nil policy denies. In other words, Not
+// inverts allow/deny but never converts a failure into access.
 //
+// Policies meant for negation must therefore deny with torge.Forbidden
+// (status 403); a policy returning a plain error can never be negated to
+// allow:
+//
+//	banned := auth.Policy(func(_ *torge.Context, p torge.Principal) error {
+//	    if suspended(p) {
+//	        return torge.Forbidden(auth.CodeForbidden, "account suspended")
+//	    }
+//	    return nil
+//	})
 //	mw := auth.Require(auth.Not(banned))
 func Not(policy Policy) Policy {
 	return func(c *torge.Context, p torge.Principal) error {
 		if policy == nil {
+			return errPolicyDenied
+		}
+		err := policy(c, p)
+		if err == nil {
+			return errPolicyDenied
+		}
+		if isDenial(err) {
 			return nil
 		}
-		if err := policy(c, p); err != nil {
-			return nil
-		}
-		return errPolicyDenied
+		return err
 	}
+}
+
+// isDenial reports whether err is an explicit authorization denial: a 403
+// *torge.Error or one of this package's denial sentinels.
+func isDenial(err error) bool {
+	if errors.Is(err, errPolicyDenied) || errors.Is(err, errNotOwner) {
+		return true
+	}
+	var terr *torge.Error
+	return errors.As(err, &terr) && terr.Status == http.StatusForbidden
 }
 
 // OwnerIs returns a Policy that allows only when the request subject
 // equals the resource owner. subject extracts the subject from the
 // request (for example c.Param("id")); owner extracts the owner from the
-// principal (usually p.ID()). A mismatch, a nil principal, or a nil
-// extractor denies.
+// principal (usually p.ID()). A mismatch denies, as do a nil principal,
+// nil extractors, and empty values on either side: an empty subject (a
+// missing or misnamed parameter) must never equal an empty owner ID.
 //
 //	mw := auth.Require(auth.OwnerIs(
 //	    func(c *torge.Context) string { return c.Param("id") },
@@ -112,7 +141,8 @@ func OwnerIs(subject func(*torge.Context) string, owner func(torge.Principal) st
 		if subject == nil || owner == nil || p == nil {
 			return errNotOwner
 		}
-		if subject(c) != owner(p) {
+		s, o := subject(c), owner(p)
+		if s == "" || o == "" || s != o {
 			return errNotOwner
 		}
 		return nil

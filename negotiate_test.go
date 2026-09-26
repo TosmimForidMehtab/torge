@@ -72,6 +72,18 @@ func TestHostnameSecureXHR(t *testing.T) {
 	if c.Hostname() != "example.com" {
 		t.Fatalf("bad hostname %q", c.Hostname())
 	}
+	for _, tc := range []struct{ host, want string }{
+		{"[::1]", "::1"},
+		{"[::1]:8080", "::1"},
+		{"Example.COM.", "example.com"},
+	} {
+		r := httptest.NewRequest("GET", "http://x/", nil)
+		r.Host = tc.host
+		h := app.NewContext(httptest.NewRecorder(), r).Hostname()
+		if h != tc.want {
+			t.Fatalf("hostname %q = %q, want %q", tc.host, h, tc.want)
+		}
+	}
 	if !c.Secure() {
 		t.Fatal("https request must be secure")
 	}
@@ -117,25 +129,46 @@ func TestAccepts(t *testing.T) {
 	tc.GET("/accepts").Do().ExpectStatus(200).ExpectJSONPath("match", "application/json")
 	tc.GET("/accepts").Header("Accept", "text/csv").Do().
 		ExpectStatus(200).ExpectJSONPath("match", "")
+	// RFC 9110: matching is case-insensitive.
+	tc.GET("/accepts").Header("Accept", "Application/JSON").Do().
+		ExpectStatus(200).ExpectJSONPath("match", "application/json")
+	// RFC 9110: q=0 excludes the type even when a wildcard matches.
+	tc.GET("/accepts").Header("Accept", "text/html;q=0, */*").Do().
+		ExpectStatus(200).ExpectJSONPath("match", "application/json")
+}
+
+func formatUser(c *torge.Context) error {
+	user := User{ID: "1", Name: "Ada", Email: "ada@example.com"}
+	return c.Format(
+		torge.Offer{Name: "json", Handle: func(c *torge.Context) error { return c.JSON(200, user) }},
+		torge.Offer{Name: "html", Handle: func(c *torge.Context) error { return c.HTML(200, "<h1>Ada</h1>") }},
+	)
 }
 
 func TestFormat(t *testing.T) {
 	app := torgetest.NewApp(t)
-	app.GET("/user", func(c *torge.Context) error {
-		user := User{ID: "1", Name: "Ada", Email: "ada@example.com"}
-		return c.Format(map[string]torge.Handler{
-			"html": func(c *torge.Context) error { return c.HTML(200, "<h1>Ada</h1>") },
-			"json": func(c *torge.Context) error { return c.JSON(200, user) },
-		})
-	})
+	app.GET("/user", formatUser)
 	tc := torgetest.New(t, app)
 
 	tc.GET("/user").Header("Accept", "application/json").Do().
-		ExpectStatus(200).ExpectJSONPath("name", "Ada")
+		ExpectStatus(200).ExpectJSONPath("name", "Ada").
+		ExpectHeader("Vary", "Accept")
 	tc.GET("/user").Header("Accept", "text/html").Do().
 		ExpectStatus(200).ExpectBody("<h1>Ada</h1>")
+	// No Accept header serves the first offer, not the alphabetical one.
+	tc.GET("/user").Do().
+		ExpectStatus(200).ExpectJSONPath("name", "Ada")
 	tc.GET("/user").Header("Accept", "text/csv").Do().
 		ExpectStatus(406).ExpectErrorCode(torge.CodeNotAcceptable)
+	tc.GET("/user").Do().
+		ExpectStatus(200).ExpectHeaderPresent("Vary")
+}
+
+func TestFormatEmpty(t *testing.T) {
+	app := torgetest.NewApp(t)
+	app.GET("/empty", func(c *torge.Context) error { return c.Format() })
+	tc := torgetest.New(t, app)
+	tc.GET("/empty").Do().ExpectStatus(406).ExpectErrorCode(torge.CodeNotAcceptable)
 }
 
 func TestNotAcceptableConstructor(t *testing.T) {

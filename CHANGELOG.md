@@ -12,34 +12,42 @@ entries are marked with their module.
 ### Added
 
 - List ergonomics: embeddable `PageParams` (defaults `page=1`,
-  `page_size=20`, bounds `1..100`), `Page[T]` envelope with `NewPage`,
-  `HasNext`/`HasPrev`, cursor pagination (`CursorParams`, `CursorPage[T]`),
-  allow-list `ParseSort`, embeddable `Search`, and RFC 8288
-  `Context.SetPageLinks`. Binding, validation and OpenAPI derive from the
-  same structs.
-- Express-style request/response helpers: `Send` (type-dispatched responses),
-  `Format`/`Accepts`/`Is` (q-value content negotiation with shorthands),
-  `Location`, `Links`, `Type`, `ClearCookie`, `Hostname`, `Secure`, `XHR`,
-  plus the `NOT_ACCEPTABLE` error code and `NotAcceptable` constructor.
+  `page_size=20`, bounds `1..100`, page capped with a saturating `Offset`),
+  `Page[T]` envelope with `NewPage`, `HasNext`/`HasPrev`, cursor pagination
+  (`CursorParams`, `CursorPage[T]`), allow-list `ParseSort`, embeddable
+  `Search`, and RFC 8288 `Context.SetPageLinks` (preserves request query).
+  Binding, validation and OpenAPI derive from the same structs.
+- Request/response helpers: `Send` (type-dispatched responses),
+  `Format` (ordered `Offer`s, first is the default, `Vary: Accept`),
+  `Accepts`/`Is` (RFC 9110 matching: case-insensitive, q=0 excludes,
+  fixed shorthand table), `Location`, `Links`, `Type`, `ClearCookie`,
+  `Hostname`, `Secure`, `XHR`, plus the `NOT_ACCEPTABLE` error code and
+  `NotAcceptable` constructor.
 - Success and error contracts: `Result[T]` envelope (`NewResult`, `WithMeta`)
   and opt-in RFC 9457 problem details (`ProblemBody`, `NewProblem`,
   `ProblemErrorHandler` via `WithErrorHandler`); the default error envelope
   is unchanged.
 - Binding: `Strict` marker input (unknown JSON fields rejected, undeclared
-  query parameters fail with 422), `query:"tag,comma"` splitting,
-  `layout` tag for `time.Time` parameters, and `BindFormValues` for
-  multipart form fields (pairs with `upload.Stream`).
+  query parameters fail with 422, deterministic even with no declared
+  params), `query:"tag,comma"` splitting, `layout` tag for `time.Time`
+  parameters, and `Context.BindFormValues` for multipart form fields
+  (pairs with `upload.Stream`, uses the app validator).
 - OpenAPI: `RequestContentType` (document uploads with `format:"binary"`
   fields), `RequestExample`/`ResponseExample` (example-only entries enrich
   rather than replace documented schemas), `Scopes` merging into `Security`,
   and `openapi.Discriminator` for `oneOf` polymorphism via `SchemaProvider`.
 - Versioning: `Group.Version` (`/api/<version>` plus tag), `Sunset` route
-  option (OpenAPI deprecated plus `Deprecation`/`Sunset` headers, works on
-  groups), `middleware.APIVersion` with `RequestVersion` (`Accept-Version`
-  negotiation, latest by default), and `RouteInfo.Deprecated`.
-- Realtime: `realtime.Hub` topic broadcast with replay buffers,
-  Last-Event-ID resume, non-blocking publish and a `Serve` bridge to SSE.
-- Auth: composable `auth.Policy` (`All`, `Any`, `Not`) plus
+  option (date validated at registration, OpenAPI deprecated plus
+  `Deprecation`/`Sunset` headers, works on groups),
+  `middleware.APIVersion` with `RequestVersion` (`Accept-Version`
+  negotiation defaulting to the oldest version, `Vary: Accept-Version`),
+  and `RouteInfo.Deprecated`.
+- Realtime: `realtime.Hub` topic broadcast with ring-buffer replay,
+  Last-Event-ID resume, non-blocking publish (slow subscribers are
+  disconnected to replay on reconnect), idle topic reclamation and a
+  `Serve` bridge to SSE.
+- Auth: composable `auth.Policy` (`All`, `Any`, fail-closed `Not` that
+  inverts only explicit 403 denials) plus empty-safe
   `OwnerIs`/`RequireOwnerID`, wired through `auth.Require`.
 - Testing and DX: `torgetest.FetchOpenAPI`/`AssertOpenAPIGolden` snapshot
   helpers and a `torge routes --check` route-table drift gate.

@@ -2,7 +2,6 @@ package torge
 
 import (
 	"maps"
-	"mime"
 	"net"
 	"net/http"
 	"slices"
@@ -11,22 +10,23 @@ import (
 	"time"
 )
 
-// Express-style request/response conveniences, implemented the Torge way.
-//
-// Express applications lean on a small set of `req`/`res` helpers (`send`,
-// `format`, `accepts`, `is`, `location`, `type`, `links`, signed-cookie and
-// host helpers). Torge already covers the fundamentals with stronger
-// guarantees (spoof-safe RealIP, validated binding, typed handlers); this
-// file closes the remaining ergonomic gaps without changing any existing
-// behavior. Everything here is stdlib-only and additive.
+// Request/response conveniences in the spirit of Express's `req`/`res`
+// helpers (`send`, `format`, `accepts`, `is`, `location`, `type`, `links`,
+// cookie and host helpers). Torge already covers the fundamentals with
+// stronger guarantees (spoof-safe RealIP, validated binding, typed
+// handlers); this file closes the remaining ergonomic gaps without changing
+// any existing behavior. Everything here is stdlib-only and additive.
 
-// ---- Request helpers ----
+// Request helpers.
 
-// Hostname returns the request host without the port, lowercased.
+// Hostname returns the request host without the port, lowercased. A bare
+// IPv6 host keeps no brackets: "[::1]" and "::1" both yield "::1".
 func (c *Context) Hostname() string {
 	h := c.req.Host
 	if host, _, err := net.SplitHostPort(h); err == nil {
 		h = host
+	} else {
+		h = strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
 	}
 	return strings.ToLower(strings.TrimSuffix(h, "."))
 }
@@ -86,39 +86,50 @@ func (c *Context) Accepts(types ...string) string {
 	return ""
 }
 
-// Format runs the handler whose key best matches the request Accept header,
-// selected by client preference (q-values, then specificity). Keys accept
-// MIME types or shorthands. When nothing matches it returns a 406 error, so
-// it can be returned directly from a handler:
-//
-//	return c.Format(map[string]torge.Handler{
-//		"html":  func(c *torge.Context) error { return c.HTML(200, "<h1>hi</h1>") },
-//		"json":  func(c *torge.Context) error { return c.JSON(200, user) },
-//	})
-func (c *Context) Format(handlers map[string]Handler) error {
-	keys := slices.Sorted(maps.Keys(handlers))
-	expanded := make([]string, len(keys))
-	for i, k := range keys {
-		expanded[i] = expandMediaShorthand(strings.ToLower(strings.TrimSpace(k)))
-	}
-	header := c.req.Header.Get("Accept")
-	best := -1
-	if strings.TrimSpace(header) == "" && len(keys) > 0 {
-		best = 0
-	} else if len(keys) > 0 {
-		best = negotiateContentType(header, expanded)
-	}
-	if best < 0 {
-		offered := strings.Join(keys, ", ")
-		if offered == "" {
-			offered = "(nothing)"
-		}
-		return NotAcceptable(CodeNotAcceptable, "None of the offered media types match the Accept header; available: "+offered)
-	}
-	return handlers[keys[best]](c)
+// Offer is one response representation Format can serve. Name accepts a
+// MIME type or a shorthand ("html", "json").
+type Offer struct {
+	Name   string
+	Handle Handler
 }
 
-// ---- Response helpers ----
+// Format runs the offer whose name best matches the request Accept header,
+// selected per RFC 9110 (most specific range wins, then highest q-value,
+// then offer order). The first offer is the default when the client sends
+// no Accept header, so list the preferred representation first. A Vary:
+// Accept header is set on every response Format writes. When nothing
+// matches Format returns a 406 error, so it can be returned directly from
+// a handler:
+//
+//	return c.Format(
+//		torge.Offer{Name: "json", Handle: func(c *torge.Context) error {
+//			return c.JSON(200, user)
+//		}},
+//		torge.Offer{Name: "html", Handle: func(c *torge.Context) error {
+//			return c.HTML(200, "<h1>hi</h1>")
+//		}},
+//	)
+func (c *Context) Format(offers ...Offer) error {
+	if len(offers) == 0 {
+		return NotAcceptable(CodeNotAcceptable, "None of the offered media types match the Accept header; available: (nothing)")
+	}
+	names := make([]string, len(offers))
+	for i, o := range offers {
+		names[i] = o.Name
+	}
+	header := c.req.Header.Get("Accept")
+	best := 0
+	if strings.TrimSpace(header) != "" {
+		best = negotiateContentType(header, expandOfferNames(names))
+	}
+	if best < 0 {
+		return NotAcceptable(CodeNotAcceptable, "None of the offered media types match the Accept header; available: "+strings.Join(names, ", "))
+	}
+	addVary(c, "Accept")
+	return offers[best].Handle(c)
+}
+
+// Response helpers.
 
 // Location sets the Location response header without changing the status.
 // Pair it with Redirect or a 201 Created response.
@@ -175,28 +186,62 @@ func (c *Context) ClearCookie(name string) {
 	})
 }
 
-// ---- Content negotiation internals ----
+// Content negotiation internals.
 
-// expandMediaShorthand maps "json" to "application/json" and similar via the
-// standard extension table plus a few names without extensions. Inputs
-// containing "/" pass through unchanged.
+// mediaShorthands maps short names to MIME types with a fixed table, so
+// resolution never depends on OS tables such as the Windows registry or
+// /etc/mime.types.
+var mediaShorthands = map[string]string{
+	"html": "text/html",
+	"htm":  "text/html",
+	"json": "application/json",
+	"xml":  "application/xml",
+	"text": "text/plain",
+	"txt":  "text/plain",
+	"csv":  "text/csv",
+	"css":  "text/css",
+	"form": "application/x-www-form-urlencoded",
+	"bin":  "application/octet-stream",
+}
+
+// expandMediaShorthand maps "json" to "application/json" and similar via
+// the fixed shorthand table. Inputs containing "/" pass through unchanged,
+// as do unknown names (which resolve to application/octet-stream).
 func expandMediaShorthand(t string) string {
 	if strings.Contains(t, "/") || t == "" {
 		return t
 	}
-	if resolved := mime.TypeByExtension("." + t); resolved != "" {
-		if mt, _, err := mime.ParseMediaType(resolved); err == nil {
-			return mt
-		}
+	if resolved, ok := mediaShorthands[t]; ok {
 		return resolved
 	}
-	switch t {
-	case "text":
-		return "text/plain"
-	case "xml":
-		return "application/xml"
-	}
 	return "application/octet-stream"
+}
+
+// expandOfferNames expands offer names for matching while keeping the
+// original names for reporting.
+func expandOfferNames(names []string) []string {
+	expanded := make([]string, len(names))
+	for i, n := range names {
+		expanded[i] = expandMediaShorthand(strings.ToLower(strings.TrimSpace(n)))
+	}
+	return expanded
+}
+
+// addVary appends value to the Vary response header without duplicating it.
+func addVary(c *Context, value string) {
+	for _, v := range c.Response().Header().Values("Vary") {
+		for part := range strings.SplitSeq(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	h := c.Response().Header()
+	if h.Get("Vary") == "" {
+		h.Set("Vary", value)
+	} else {
+		h.Set("Vary", h.Get("Vary")+", "+value)
+	}
 }
 
 // withCharset adds a UTF-8 charset to text media types lacking parameters.
@@ -214,18 +259,20 @@ type acceptRange struct {
 	typ, sub    string
 	q           float64
 	specificity int
-	order       int
 }
 
+// parseAccept parses an Accept header into media ranges in header order.
+// Types are lowercased per RFC 9110. Ranges with q=0 are kept: they exclude
+// the type rather than merely ranking it last.
 func parseAccept(header string) []acceptRange {
 	var out []acceptRange
-	for i, part := range strings.Split(header, ",") {
+	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
 		segments := strings.Split(part, ";")
-		mt := baseMediaType(segments[0])
+		mt := strings.ToLower(baseMediaType(segments[0]))
 		typ, sub, ok := strings.Cut(mt, "/")
 		if !ok || typ == "" || sub == "" {
 			continue
@@ -239,49 +286,49 @@ func parseAccept(header string) []acceptRange {
 				}
 			}
 		}
-		if q <= 0 {
-			continue
-		}
 		specificity := 2
 		if typ == "*" {
 			specificity = 0
 		} else if sub == "*" {
 			specificity = 1
 		}
-		out = append(out, acceptRange{typ: typ, sub: sub, q: q, specificity: specificity, order: i})
+		out = append(out, acceptRange{typ: typ, sub: sub, q: q, specificity: specificity})
 	}
-	slices.SortStableFunc(out, func(a, b acceptRange) int {
-		if a.q != b.q {
-			if a.q > b.q {
-				return -1
-			}
-			return 1
-		}
-		if a.specificity != b.specificity {
-			if a.specificity > b.specificity {
-				return -1
-			}
-			return 1
-		}
-		return 0
-	})
 	return out
 }
 
-// negotiateContentType returns the index into offered (already expanded,
-// lowercase MIME types) most preferred by the Accept header, or -1.
-func negotiateContentType(header string, offered []string) int {
-	ranges := parseAccept(header)
+// matchQuality returns the q-value selecting offered type o (an expanded,
+// lowercase MIME type): the q of the most specific matching range, or
+// -1 when no range matches. A q of 0 excludes the type.
+func matchQuality(ranges []acceptRange, o string) float64 {
+	typ, sub, ok := strings.Cut(o, "/")
+	if !ok {
+		return -1
+	}
+	bestSpec := -1
+	q := -1.0
 	for _, r := range ranges {
-		for i, o := range offered {
-			typ, sub, ok := strings.Cut(o, "/")
-			if !ok {
-				continue
-			}
-			if (r.typ == "*" || r.typ == typ) && (r.sub == "*" || r.sub == sub) {
-				return i
+		if (r.typ == "*" || r.typ == typ) && (r.sub == "*" || r.sub == sub) {
+			if r.specificity > bestSpec {
+				bestSpec = r.specificity
+				q = r.q
 			}
 		}
 	}
-	return -1
+	return q
+}
+
+// negotiateContentType returns the index into offered (already expanded,
+// lowercase MIME types) most preferred by the Accept header, or -1. The
+// highest q-value wins; ties prefer the earlier offer. Types with q=0 are
+// excluded.
+func negotiateContentType(header string, offered []string) int {
+	ranges := parseAccept(header)
+	best, bestQ := -1, 0.0
+	for i, o := range offered {
+		if q := matchQuality(ranges, o); q > bestQ {
+			best, bestQ = i, q
+		}
+	}
+	return best
 }

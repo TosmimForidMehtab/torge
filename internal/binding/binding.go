@@ -9,6 +9,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -287,14 +288,20 @@ func (p *Plan) Bind(dst reflect.Value, src Source) error {
 		if query == nil {
 			query = src.QueryValues()
 		}
+		var unknown []string
 		for name := range query {
 			if _, ok := p.queryParams[name]; !ok {
-				errs = append(errs, validate.FieldError{
-					Field:   "query." + name,
-					Rule:    "unknown",
-					Message: fmt.Sprintf("unknown query parameter %q", name),
-				})
+				unknown = append(unknown, name)
 			}
+		}
+		// Sorted so the 422 details are deterministic across requests.
+		slices.Sort(unknown)
+		for _, name := range unknown {
+			errs = append(errs, validate.FieldError{
+				Field:   "query." + name,
+				Rule:    "unknown",
+				Message: fmt.Sprintf("unknown query parameter %q", name),
+			})
 		}
 	}
 	if len(errs) > 0 {

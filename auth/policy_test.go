@@ -79,19 +79,47 @@ func TestAny(t *testing.T) {
 	}
 }
 
+var errTestOperational = errors.New("db down")
+
+func forbiddenPolicy(msg string) auth.Policy {
+	return func(_ *torge.Context, _ torge.Principal) error {
+		return torge.Forbidden(auth.CodeForbidden, msg)
+	}
+}
+
 func TestNot(t *testing.T) {
 	p := &auth.User{Subject: "u1"}
-	if err := auth.Not(denyPolicy(errTestDenyA))(nil, p); err != nil {
-		t.Fatalf("Not(deny) = %v, want nil", err)
+	// Explicit 403 denials invert to allow.
+	if err := auth.Not(forbiddenPolicy("nope"))(nil, p); err != nil {
+		t.Fatalf("Not(403) = %v, want nil", err)
 	}
 	if err := auth.Not(allowPolicy)(nil, p); err == nil {
 		t.Fatal("Not(allow) must deny, got nil")
 	}
+	// Operational failures pass through: still deny, with the same error.
+	err := auth.Not(denyPolicy(errTestOperational))(nil, p)
+	if !errors.Is(err, errTestOperational) {
+		t.Fatalf("Not(operational) = %v, want passthrough of %v", err, errTestOperational)
+	}
+	// Other statuses pass through too.
+	unauthorized := torge.Unauthorized("UNAUTH", "nope")
+	if err := auth.Not(denyPolicy(unauthorized))(nil, p); !errors.Is(err, unauthorized) {
+		t.Fatalf("Not(401) = %v, want passthrough", err)
+	}
+	// Plain custom errors pass through: they are not explicit denials.
+	if err := auth.Not(denyPolicy(errTestDenyA))(nil, p); !errors.Is(err, errTestDenyA) {
+		t.Fatalf("Not(plain) = %v, want passthrough of %v", err, errTestDenyA)
+	}
+	// A nil policy denies.
+	if err := auth.Not(nil)(nil, p); err == nil {
+		t.Fatal("Not(nil) must deny, got nil")
+	}
+	// Double negation restores allow but never converts failure to access.
 	if err := auth.Not(auth.Not(allowPolicy))(nil, p); err != nil {
 		t.Fatalf("Not(Not(allow)) = %v, want nil", err)
 	}
-	if err := auth.Not(nil)(nil, p); err != nil {
-		t.Fatalf("Not(nil) = %v, want nil (nil counts as denying)", err)
+	if err := auth.Not(auth.Not(forbiddenPolicy("nope")))(nil, p); err == nil {
+		t.Fatal("Not(Not(deny)) must deny, got nil")
 	}
 }
 
@@ -117,6 +145,15 @@ func TestOwnerIs(t *testing.T) {
 	if err := auth.OwnerIs(subject("u1"), nil)(nil, owner); err == nil {
 		t.Fatal("OwnerIs(nil owner) must deny, got nil")
 	}
+	// Empty on either side denies: a missing parameter must never equal an
+	// empty owner ID.
+	emptyOwner := &auth.User{Subject: ""}
+	if err := auth.OwnerIs(subject(""), byID)(nil, emptyOwner); err == nil {
+		t.Fatal("OwnerIs(empty, empty) must deny, got nil")
+	}
+	if err := auth.OwnerIs(subject(""), byID)(nil, owner); err == nil {
+		t.Fatal("OwnerIs(empty subject) must deny, got nil")
+	}
 }
 
 func TestPolicyComposition(t *testing.T) {
@@ -134,7 +171,15 @@ func TestPolicyComposition(t *testing.T) {
 	if err := composed(nil, readerOnly); err == nil {
 		t.Fatal("composed(no admin role) must deny, got nil")
 	}
-	negated := auth.All(rolePolicy("admin"), auth.Not(scopePolicy("suspended")))
+	// Negation needs an explicit 403 denial: require the suspended scope
+	// (403 when missing) so that Not allows exactly the non-suspended.
+	requireSuspended := auth.Policy(func(_ *torge.Context, p torge.Principal) error {
+		if s, ok := p.(interface{ HasScope(string) bool }); ok && s.HasScope("suspended") {
+			return nil
+		}
+		return torge.Forbidden(auth.CodeForbidden, "suspended scope required")
+	})
+	negated := auth.All(rolePolicy("admin"), auth.Not(requireSuspended))
 	if err := negated(nil, adminReader); err != nil {
 		t.Fatalf("All(admin, Not(suspended)) = %v, want nil", err)
 	}
@@ -149,8 +194,18 @@ func TestPolicyDenialsMapToForbidden(t *testing.T) {
 	authed := auth.Required(auth.Bearer(verifyToken))
 	app.GET("/combo", func(c *torge.Context) error { return c.NoContent(204) },
 		authed, auth.Require(auth.All(rolePolicy("admin"), auth.Any(scopePolicy("read"), scopePolicy("write")))))
+	// Negation works on explicit 403 denials: require the write scope
+	// (403 when missing) so Not allows exactly the readers.
+	requireWrite := auth.Policy(func(_ *torge.Context, p torge.Principal) error {
+		if s, ok := p.(interface {
+			HasScope(string) bool
+		}); ok && s.HasScope("write") {
+			return nil
+		}
+		return torge.Forbidden(auth.CodeForbidden, "write scope required")
+	})
 	app.GET("/neg", func(c *torge.Context) error { return c.NoContent(204) },
-		authed, auth.Require(auth.Not(scopePolicy("write"))))
+		authed, auth.Require(auth.Not(requireWrite)))
 	app.GET("/users/:id", func(c *torge.Context) error { return c.NoContent(204) },
 		authed, auth.Require(auth.RequireOwnerID("id")))
 	app.GET("/owner-fn", func(c *torge.Context) error { return c.NoContent(204) },

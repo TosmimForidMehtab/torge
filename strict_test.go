@@ -1,6 +1,8 @@
 package torge_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -129,13 +131,20 @@ func TestTimeLayoutParam(t *testing.T) {
 	tc.GET("/day?day=09/26/2026").Do().ExpectStatus(422).ExpectErrorCode(torge.CodeValidation)
 }
 
+func formTestContext(t *testing.T) *torge.Context {
+	t.Helper()
+	app := torgetest.NewApp(t)
+	return app.NewContext(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
+}
+
 func TestBindFormValues(t *testing.T) {
+	c := formTestContext(t)
 	type Signup struct {
 		Name string   `query:"name" validate:"required,min=2"`
 		Tags []string `query:"tag,comma"`
 	}
 	var s Signup
-	if err := torge.BindFormValues(&s, url.Values{"name": {"Ada"}, "tag": {"a,b"}}); err != nil {
+	if err := c.BindFormValues(&s, url.Values{"name": {"Ada"}, "tag": {"a,b"}}); err != nil {
 		t.Fatal(err)
 	}
 	if s.Name != "Ada" || len(s.Tags) != 2 || s.Tags[1] != "b" {
@@ -143,28 +152,29 @@ func TestBindFormValues(t *testing.T) {
 	}
 
 	var bad Signup
-	err := torge.BindFormValues(&bad, url.Values{"name": {"x"}})
+	err := c.BindFormValues(&bad, url.Values{"name": {"x"}})
 	if got := torge.AsError(err); got.Code != torge.CodeValidation {
 		t.Fatalf("expected validation failure, got %+v", err)
 	}
 
 	var strict StrictSearchInput
-	err = torge.BindFormValues(&strict, url.Values{"q": {"a"}, "nope": {"1"}})
+	err = c.BindFormValues(&strict, url.Values{"q": {"a"}, "nope": {"1"}})
 	if got := torge.AsError(err); got.Code != torge.CodeValidation {
 		t.Fatalf("expected strict rejection, got %+v", err)
 	}
 
 	var notStruct string
-	if err := torge.BindFormValues(&notStruct, url.Values{}); err == nil {
+	if err := c.BindFormValues(&notStruct, url.Values{}); err == nil {
 		t.Fatal("expected pointer-to-struct error")
 	}
 }
 
 func TestBindingCompileErrors(t *testing.T) {
+	c := formTestContext(t)
 	type BadComma struct {
 		Tag string `query:"tag,comma"`
 	}
-	if err := torge.BindFormValues(&BadComma{}, url.Values{}); err == nil ||
+	if err := c.BindFormValues(&BadComma{}, url.Values{}); err == nil ||
 		!strings.Contains(err.Error(), "comma") {
 		t.Fatalf("expected comma error, got %v", err)
 	}
@@ -172,7 +182,7 @@ func TestBindingCompileErrors(t *testing.T) {
 	type BadOpt struct {
 		Tag []string `query:"tag,frobnicate"`
 	}
-	if err := torge.BindFormValues(&BadOpt{}, url.Values{}); err == nil ||
+	if err := c.BindFormValues(&BadOpt{}, url.Values{}); err == nil ||
 		!strings.Contains(err.Error(), "unknown tag option") {
 		t.Fatalf("expected option error, got %v", err)
 	}
@@ -180,8 +190,42 @@ func TestBindingCompileErrors(t *testing.T) {
 	type BadLayout struct {
 		N int `query:"n" layout:"2006-01-02"`
 	}
-	if err := torge.BindFormValues(&BadLayout{}, url.Values{}); err == nil ||
+	if err := c.BindFormValues(&BadLayout{}, url.Values{}); err == nil ||
 		!strings.Contains(err.Error(), "layout") {
 		t.Fatalf("expected layout error, got %v", err)
 	}
+}
+
+type StrictBodyOnlyInput struct {
+	torge.Strict
+	Name string `json:"name"`
+}
+
+func TestStrictQueryWithoutParams(t *testing.T) {
+	app := torgetest.NewApp(t)
+	app.POST("/body-only", func(c *torge.Context) error {
+		var in StrictBodyOnlyInput
+		if err := c.Bind(&in); err != nil {
+			return err
+		}
+		return c.JSON(200, map[string]string{"name": in.Name})
+	})
+	tc := torgetest.New(t, app)
+
+	// No query fields declared: every query parameter is undeclared, and
+	// details must arrive in a deterministic (sorted) order.
+	res := tc.POST("/body-only?z=1&a=1").JSON(map[string]string{"name": "Ada"}).Do().
+		ExpectStatus(422).ExpectErrorCode(torge.CodeValidation)
+	var body struct {
+		Error struct {
+			Details []validate.FieldError `json:"details"`
+		} `json:"error"`
+	}
+	res.DecodeJSON(&body)
+	if len(body.Error.Details) != 2 ||
+		body.Error.Details[0].Field != "query.a" ||
+		body.Error.Details[1].Field != "query.z" {
+		t.Fatalf("details must be sorted, got %+v", body.Error.Details)
+	}
+	tc.POST("/body-only").JSON(map[string]string{"name": "Ada"}).Do().ExpectStatus(200)
 }

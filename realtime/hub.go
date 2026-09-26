@@ -13,7 +13,7 @@
 //		}
 //	}()
 //
-//	torge.Get(app, "/rooms/:id/events", func(c *torge.Context) error {
+//	app.GET("/rooms/:id/events", func(c *torge.Context) error {
 //		return hub.Serve(c, "room:"+c.Param("id"))
 //	})
 //
@@ -94,10 +94,17 @@ func WithReplayBufferSize(size int) HubOption {
 // Hub is a concurrency-safe topic-based SSE broadcast hub. The zero value is
 // not usable; construct it with NewHub.
 //
-// Publishing never blocks: each subscriber has its own buffered channel and
-// an event is dropped for a subscriber whose buffer is full, while every
-// other subscriber still receives it. The Hub itself starts no goroutines,
-// so Unsubscribe and Close cannot leak any.
+// Publishing never blocks: each subscriber has its own buffered channel. A
+// subscriber whose buffer is full is disconnected (its channel is closed)
+// instead of silently missing events, so its client reconnects with
+// Last-Event-ID and replays what it missed from the topic's ring buffer.
+// Every other subscriber still receives the event. The Hub itself starts no
+// goroutines, so Unsubscribe and Close cannot leak any.
+//
+// Topics with no subscribers and nothing retained for replay are deleted,
+// so URL-derived topics cannot grow server memory without bound. Topics
+// holding replay buffers are retained (bounded at the configured size)
+// until a subscriber returns.
 //
 // Example:
 //
@@ -115,8 +122,11 @@ type Hub struct {
 
 type hubTopic struct {
 	next uint64
-	buf  []Event
-	subs map[*hubSubscriber]struct{}
+	// buf is a ring buffer of the most recent events, oldest at start.
+	// Its length never exceeds the Hub's replay size.
+	buf   []Event
+	start int
+	subs  map[*hubSubscriber]struct{}
 }
 
 type hubSubscriber struct {
@@ -142,10 +152,11 @@ func NewHub(opts ...HubOption) *Hub {
 }
 
 // Publish delivers e to every subscriber of topic and records it in the
-// topic's replay buffer. When e.ID is empty it is set to the next per-topic
-// sequence number, which always advances once per Publish even when custom
-// IDs are used. Publish never blocks: a subscriber whose buffer is full
-// misses that event. Publishing to a closed Hub is a no-op.
+// topic's replay ring buffer. When e.ID is empty it is set to the next
+// per-topic sequence number, which always advances once per Publish even
+// when custom IDs are used. Publish never blocks: a subscriber whose
+// buffer is full is disconnected (see Hub) while every other subscriber
+// still receives the event. Publishing to a closed Hub is a no-op.
 //
 // Example:
 //
@@ -162,18 +173,23 @@ func (h *Hub) Publish(topic string, e Event) {
 		e.ID = strconv.FormatUint(t.next, 10)
 	}
 	if h.replay > 0 {
-		t.buf = append(t.buf, e)
-		if len(t.buf) > h.replay {
-			t.buf = append([]Event(nil), t.buf[len(t.buf)-h.replay:]...)
+		if len(t.buf) < h.replay {
+			t.buf = append(t.buf, e)
+		} else {
+			t.buf[t.start] = e
+			t.start = (t.start + 1) % len(t.buf)
 		}
 	}
+	var drop []*hubSubscriber
 	for sub := range t.subs {
 		select {
 		case sub.ch <- e:
 		default:
-			// Slow subscriber: drop for it rather than
-			// blocking every other subscriber and the publisher.
+			drop = append(drop, sub)
 		}
+	}
+	for _, sub := range drop {
+		h.detachLocked(topic, t, sub)
 	}
 }
 
@@ -211,10 +227,10 @@ func (h *Hub) Subscribe(topic, lastID string) (<-chan Event, func()) {
 	sub := &hubSubscriber{ch: make(chan Event, size)}
 	t.subs[sub] = struct{}{}
 	if lastID != "" {
-		for _, e := range t.buf {
-			// Replay fits: at most len(t.buf) <= replay <= cap(sub.ch)
-			// events are queued into an empty channel.
-			if afterLastID(e.ID, lastID) {
+		// Replay fits: at most len(t.buf) <= replay <= cap(sub.ch)
+		// events are queued into an empty channel, oldest first.
+		for i := 0; i < len(t.buf); i++ {
+			if e := t.buf[(t.start+i)%len(t.buf)]; afterLastID(e.ID, lastID) {
 				sub.ch <- e
 			}
 		}
@@ -264,7 +280,7 @@ func (h *Hub) Close() {
 //
 // Example:
 //
-//	torge.Get(app, "/events", func(c *torge.Context) error {
+//	app.GET("/events", func(c *torge.Context) error {
 //		return hub.Serve(c, "room:1")
 //	})
 func (h *Hub) Serve(c *torge.Context, topic string) error {
@@ -307,12 +323,33 @@ func (h *Hub) removeSub(topic string, sub *hubSubscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if t, ok := h.topics[topic]; ok {
-		delete(t.subs, sub)
+		h.detachLocked(topic, t, sub)
+	} else if !sub.closed {
+		sub.closed = true
+		close(sub.ch)
+	}
+}
+
+// detachLocked removes sub from t and closes its channel. When the topic
+// has no subscribers left and retains nothing for replay, the topic itself
+// is deleted. Callers hold h.mu.
+func (h *Hub) detachLocked(topic string, t *hubTopic, sub *hubSubscriber) {
+	delete(t.subs, sub)
+	if len(t.subs) == 0 && (h.replay == 0 || len(t.buf) == 0) {
+		delete(h.topics, topic)
 	}
 	if !sub.closed {
 		sub.closed = true
 		close(sub.ch)
 	}
+}
+
+// TopicCount returns the number of live topics, including ones retained
+// only for replay. Useful for observability and tests.
+func (h *Hub) TopicCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.topics)
 }
 
 // afterLastID reports whether the buffered event id was published after

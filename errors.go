@@ -266,11 +266,13 @@ type ProblemBody struct {
 	Debug     *ErrorDebug `json:"debug,omitempty"`
 }
 
-// NewProblem converts e to problem details for the request path.
+// NewProblem converts e to problem details for the request path. Title is
+// the short, stable status summary; the occurrence-specific message goes
+// in Detail.
 func NewProblem(e *Error, instance, requestID string) ProblemBody {
 	p := ProblemBody{
 		Type:      "about:blank",
-		Title:     e.Message,
+		Title:     firstNonEmpty(http.StatusText(e.Status), e.Code),
 		Status:    e.Status,
 		Detail:    e.Message,
 		Code:      e.Code,

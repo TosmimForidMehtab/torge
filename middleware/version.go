@@ -11,10 +11,14 @@ import (
 type apiVersionKey struct{}
 
 // APIVersion negotiates an API version from the Accept-Version header,
-// for example "1" or "2". The last allowed version is the default when the
-// client sends no header; unknown versions fail with a 400 listing the
-// supported versions. The resolved version is sent back in an API-Version
-// response header and is available to handlers with RequestVersion:
+// for example "1" or "2". The first allowed version is the default when
+// the client sends no header: header-less clients stay pinned to the
+// oldest version instead of silently switching to a new, possibly
+// breaking, one the day it is added, so list versions oldest-first.
+// Unknown versions fail with a 400 listing the supported versions. The
+// resolved version is sent back in an API-Version response header, a Vary:
+// Accept-Version header is set so caches and CDNs key on the version, and
+// the version is available to handlers with RequestVersion:
 //
 //	v1 := app.Version("v1")
 //	v2 := app.Version("v2")
@@ -46,12 +50,12 @@ func APIVersion(allowed ...string) torge.Middleware {
 			})
 		}
 	}
-	latest := allowed[len(allowed)-1]
+	deflt := allowed[0]
 	return func(next torge.Handler) torge.Handler {
 		return func(c *torge.Context) error {
 			v := strings.TrimSpace(c.GetHeader("Accept-Version"))
 			if v == "" {
-				v = latest
+				v = deflt
 			} else {
 				ok := false
 				for _, a := range allowed {
@@ -67,8 +71,24 @@ func APIVersion(allowed ...string) torge.Middleware {
 			}
 			c.Set(apiVersionKey{}, v)
 			c.Header("API-Version", v)
+			addVary(c, "Accept-Version")
 			return next(c)
 		}
+	}
+}
+
+// addVary appends value to the Vary response header without duplicating it.
+func addVary(c *torge.Context, value string) {
+	h := c.Response().Header()
+	for v := range strings.SplitSeq(h.Get("Vary"), ",") {
+		if strings.EqualFold(strings.TrimSpace(v), value) {
+			return
+		}
+	}
+	if h.Get("Vary") == "" {
+		h.Set("Vary", value)
+	} else {
+		h.Set("Vary", h.Get("Vary")+", "+value)
 	}
 }
 

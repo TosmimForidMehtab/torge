@@ -16,16 +16,18 @@ func TestAPIVersion(t *testing.T) {
 	})
 	tc := torgetest.New(t, app)
 
-	// No header resolves to the latest version.
+	// No header resolves to the first (oldest) version, so header-less
+	// clients never silently switch to a newer one.
 	tc.GET("/v").Do().
+		ExpectStatus(200).
+		ExpectJSONPath("version", "1").
+		ExpectHeader("API-Version", "1").
+		ExpectHeader("Vary", "Accept-Version")
+
+	tc.GET("/v").Header("Accept-Version", "2").Do().
 		ExpectStatus(200).
 		ExpectJSONPath("version", "2").
 		ExpectHeader("API-Version", "2")
-
-	tc.GET("/v").Header("Accept-Version", "1").Do().
-		ExpectStatus(200).
-		ExpectJSONPath("version", "1").
-		ExpectHeader("API-Version", "1")
 
 	tc.GET("/v").Header("Accept-Version", "9").Do().
 		ExpectStatus(400).ExpectErrorCode(torge.CodeBadRequest)

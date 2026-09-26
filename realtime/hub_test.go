@@ -3,6 +3,7 @@ package realtime_test
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -217,19 +218,86 @@ func TestSlowSubscriberDoesNotBlockPublisher(t *testing.T) {
 		t.Fatal("Publish blocked on a slow subscriber")
 	}
 
-	// The slow subscriber got the head of the stream; the rest was dropped
-	// for it rather than stalling the publisher.
+	// The slow subscriber was disconnected instead of silently missing
+	// events: its channel is closed after the buffered head.
 	n := 0
-	for {
-		select {
-		case <-ch:
-			n++
-		default:
-			if n == 0 {
-				t.Fatal("slow subscriber received nothing")
-			}
-			return
+	for range ch {
+		n++
+	}
+	if n == 0 {
+		t.Fatal("slow subscriber received nothing before disconnect")
+	}
+}
+
+func TestSlowSubscriberReconnectsAndReplays(t *testing.T) {
+	h := realtime.NewHub()
+	defer h.Close()
+	ch, _ := h.Subscribe("t", "")
+
+	const total = 201
+	for i := range total {
+		h.Publish("t", realtime.Event{Name: "n", Data: i})
+	}
+	// The subscriber kept the first 64 live events, then was disconnected.
+	var lastID string
+	n := 0
+	for e := range ch {
+		n++
+		lastID = e.ID
+	}
+	if n != 64 || lastID != "64" {
+		t.Fatalf("disconnected after %d events at id %q, want 64 at 64", n, lastID)
+	}
+
+	// Reconnecting with Last-Event-ID replays the retained tail: the last
+	// 64 of the 201 published events.
+	rech, reunsub := h.Subscribe("t", lastID)
+	defer reunsub()
+	var first, last string
+	m := 0
+	for e := range rech {
+		if m == 0 {
+			first = e.ID
 		}
+		m++
+		last = e.ID
+		if m == 64 {
+			break
+		}
+	}
+	if m != 64 || first != "138" || last != "201" {
+		t.Fatalf("replayed %d events from %q to %q, want 64 from 138 to 201", m, first, last)
+	}
+}
+
+func TestTopicsFreedAfterUnsubscribe(t *testing.T) {
+	h := realtime.NewHub()
+	defer h.Close()
+	for i := range 100 {
+		ch, unsubscribe := h.Subscribe(fmt.Sprintf("room:%d", i), "")
+		_ = ch
+		unsubscribe()
+	}
+	if n := h.TopicCount(); n != 0 {
+		t.Fatalf("topics retained = %d, want 0", n)
+	}
+}
+
+func TestTopicRetainedForReplay(t *testing.T) {
+	h := realtime.NewHub()
+	defer h.Close()
+	h.Publish("news", realtime.Event{Name: "n", Data: "1"})
+	ch, unsubscribe := h.Subscribe("news", "")
+	unsubscribe()
+	// The buffer is retained so a later subscriber can still replay it.
+	if n := h.TopicCount(); n != 1 {
+		t.Fatalf("topics retained = %d, want 1", n)
+	}
+	_ = ch
+	rech, reunsub := h.Subscribe("news", "0")
+	defer reunsub()
+	if e := recv(t, rech); e.ID != "1" {
+		t.Fatalf("replayed id = %q, want 1", e.ID)
 	}
 }
 

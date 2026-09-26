@@ -40,7 +40,8 @@ func TestProblemErrorHandler(t *testing.T) {
 		ExpectStatus(404).
 		ExpectHeader("Content-Type", "application/problem+json").
 		ExpectJSONPath("type", "about:blank").
-		ExpectJSONPath("title", "User does not exist").
+		ExpectJSONPath("title", "Not Found").
+		ExpectJSONPath("detail", "User does not exist").
 		ExpectJSONPath("status", 404).
 		ExpectJSONPath("code", "USER_NOT_FOUND").
 		ExpectJSONPath("instance", "/missing")

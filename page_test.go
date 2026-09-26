@@ -61,6 +61,35 @@ func TestPageParamsValidation(t *testing.T) {
 	tc.GET("/users?sort=bogus").Do().ExpectStatus(400).ExpectErrorCode(torge.CodeBadRequest)
 }
 
+func TestOffsetSaturates(t *testing.T) {
+	huge := torge.PageParams{Page: 9223372036854775807, PageSize: 100}
+	if off := huge.Offset(); off < 0 {
+		t.Fatalf("offset overflowed: %d", off)
+	}
+	if off := huge.Offset(); off != int(^uint(0)>>1) {
+		t.Fatalf("offset should saturate, got %d", off)
+	}
+	if off := (torge.PageParams{Page: 3, PageSize: 20}).Offset(); off != 40 {
+		t.Fatalf("bad normal offset %d", off)
+	}
+}
+
+func TestPageParamsMaxPage(t *testing.T) {
+	app := torgetest.NewApp(t)
+	torge.Get(app, "/users", listUsersHandler)
+	tc := torgetest.New(t, app)
+	tc.GET("/users?page=1000001").Do().ExpectStatus(422).ExpectErrorCode(torge.CodeValidation)
+}
+
+func TestSetPageLinksPreservesQuery(t *testing.T) {
+	app := torgetest.NewApp(t)
+	torge.Get(app, "/users", listUsersHandler)
+	tc := torgetest.New(t, app)
+	tc.GET("/users?page=1&page_size=10&role=admin&q=ada").Do().
+		ExpectStatus(200).
+		ExpectHeader("Link", `</users?page=1&page_size=10&q=ada&role=admin>; rel="first", </users?page=6&page_size=10&q=ada&role=admin>; rel="last", </users?page=2&page_size=10&q=ada&role=admin>; rel="next"`)
+}
+
 func TestNewPageMath(t *testing.T) {
 	p := torge.NewPage([]string{"a"}, 53, torge.PageParams{Page: 1, PageSize: 20})
 	if p.Pages != 3 || !p.HasNext() || p.HasPrev() {
