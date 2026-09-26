@@ -37,6 +37,12 @@ entries are marked with their module.
   option (OpenAPI deprecated plus `Deprecation`/`Sunset` headers, works on
   groups), `middleware.APIVersion` with `RequestVersion` (`Accept-Version`
   negotiation, latest by default), and `RouteInfo.Deprecated`.
+- Realtime: `realtime.Hub` topic broadcast with replay buffers,
+  Last-Event-ID resume, non-blocking publish and a `Serve` bridge to SSE.
+- Auth: composable `auth.Policy` (`All`, `Any`, `Not`) plus
+  `OwnerIs`/`RequireOwnerID`, wired through `auth.Require`.
+- Testing and DX: `torgetest.FetchOpenAPI`/`AssertOpenAPIGolden` snapshot
+  helpers and a `torge routes --check` route-table drift gate.
 
 ## [0.2.0] - 2026-09-26
 

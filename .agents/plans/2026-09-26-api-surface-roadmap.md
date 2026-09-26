@@ -34,15 +34,16 @@ Status updated as each track lands.
   `middleware.APIVersion`/`RequestVersion` (Accept-Version, latest default),
   `RouteInfo.Deprecated`. Landed in `group.go`, `route.go`,
   `middleware/version.go` + tests.
-- [ ] 6. Realtime ergonomics — SSE broadcast hub + reconnect/last-event-id
-  helpers, WS upgrade harness (library-agnostic).
-  Surfaces: `stream.go`, new `realtime` package (stdlib-only).
-- [ ] 7. Auth/policy expressiveness — scoped route helpers, ownership checks,
-  composable policies, OpenAPI security wiring.
-  Surfaces: `auth/`, `route.go` options.
-- [ ] 8. Testing + DX — OpenAPI snapshot assertions, contract-test helpers,
-  `generate client` stub, `routes --check` drift gate.
-  Surfaces: `torgetest/`, `cmd/torge`, `openapi/`.
+- [x] 6. Realtime ergonomics — `realtime.Hub` (topics, per-topic replay,
+  Last-Event-ID resume, non-blocking publish, `Serve` bridge to `c.SSE()`).
+  WS stays bring-your-own via hijack. Landed as `realtime/` + tests.
+- [x] 7. Auth/policy expressiveness — `auth.Policy` + `All`/`Any`/`Not`
+  combinators, `OwnerIs`/`RequireOwnerID`, composing with `auth.Require`
+  (403 FORBIDDEN on denial). Landed in `auth/policy.go` + tests.
+- [x] 8. Testing + DX — `torgetest.FetchOpenAPI`/`AssertOpenAPIGolden`
+  (`TORGE_UPDATE_GOLDEN=1` refresh), `torge routes --check golden.json`
+  drift gate. Landed in `torgetest/openapi.go`, `cmd/torge/main.go` + tests.
+  (`generate client` stub left as follow-up: output shape undecided.)
 
 ## Ground rules (from approved plan)
 
