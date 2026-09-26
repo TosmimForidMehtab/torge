@@ -1,7 +1,9 @@
 package torgetest_test
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +65,22 @@ func TestAssertOpenAPIGolden(t *testing.T) {
 
 	golden := filepath.Join("testdata", "openapi_golden.json")
 	torgetest.AssertOpenAPIGolden(t, doc, golden)
+
+	t.Run("crlf golden matches", func(t *testing.T) {
+		// Windows checkouts convert goldens to CRLF; the comparison must
+		// not care.
+		t.Setenv("TORGE_UPDATE_GOLDEN", "")
+		raw, err := os.ReadFile(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		crlf := bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
+		tmp := filepath.Join(t.TempDir(), "openapi.json")
+		if err := os.WriteFile(tmp, crlf, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		torgetest.AssertOpenAPIGolden(t, doc, tmp)
+	})
 
 	t.Run("mismatch detected", func(t *testing.T) {
 		// Compare against the committed wrong golden even when the outer

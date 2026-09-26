@@ -80,10 +80,19 @@ func AssertOpenAPIGolden(t testing.TB, doc openapi.Document, path string) {
 	if err != nil {
 		t.Fatalf("torgetest: read golden file %s: %v (run with TORGE_UPDATE_GOLDEN=1 to create it)", path, err)
 	}
+	// Goldens may check out with CRLF on Windows; normalize both sides so
+	// the comparison only sees content.
+	got, want = normalizeLineEndings(got), normalizeLineEndings(want)
 	if bytes.Equal(got, want) {
 		return
 	}
 	t.Fatalf("torgetest: OpenAPI snapshot %s differs:\n%s", path, diffExcerpt(string(want), string(got)))
+}
+
+// normalizeLineEndings maps CRLF (and lone CR) to LF.
+func normalizeLineEndings(b []byte) []byte {
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+	return bytes.ReplaceAll(b, []byte("\r"), []byte("\n"))
 }
 
 // diffExcerpt renders the first differing lines between want and got,
