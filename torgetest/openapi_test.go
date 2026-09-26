@@ -74,6 +74,10 @@ func TestAssertOpenAPIGolden(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Normalize first: on Windows the golden already has CRLF, and a
+		// naive LF->CRLF pass would produce CRCRLF.
+		raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+		raw = bytes.ReplaceAll(raw, []byte("\r"), []byte("\n"))
 		crlf := bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
 		tmp := filepath.Join(t.TempDir(), "openapi.json")
 		if err := os.WriteFile(tmp, crlf, 0o644); err != nil {
