@@ -52,6 +52,13 @@ entries are marked with their module.
 - Testing and DX: `torgetest.FetchOpenAPI`/`AssertOpenAPIGolden` snapshot
   helpers and a `torge routes --check` route-table drift gate.
 
+### Fixed
+
+- `torgetest`: log output written after a test finishes is dropped instead
+  of racing with the testing package. Handlers on hijacked (WebSocket)
+  connections can outlive their test because `httptest.Server.Close` does
+  not wait for them, which made `-race` runs fail intermittently.
+
 ## [0.2.0] - 2026-09-26
 
 ### Changed

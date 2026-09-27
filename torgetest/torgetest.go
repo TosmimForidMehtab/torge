@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,19 +45,45 @@ func NewApp(t testing.TB, opts ...torge.Option) *torge.App {
 // internal error details in responses, and a logger writing to t.Log so
 // output appears only for failing tests. Pass them to application
 // constructors that build their own App.
+//
+// Log lines written after the test finishes are dropped. Handlers can
+// outlive a test, for example on hijacked (WebSocket) connections that
+// httptest.Server.Close does not wait for, and writing to a finished test
+// is a data race.
 func NewAppOptions(t testing.TB) []torge.Option {
 	return []torge.Option{
 		torge.WithEnv(torge.Test),
 		torge.WithExposeErrors(true),
-		torge.WithLogger(slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug}))),
+		torge.WithLogger(slog.New(slog.NewTextHandler(newTestWriter(t), &slog.HandlerOptions{Level: slog.LevelDebug}))),
 	}
 }
 
-type testWriter struct{ t testing.TB }
+// testWriter forwards log output to t.Log until the test's cleanup runs.
+type testWriter struct {
+	t    testing.TB
+	mu   sync.Mutex
+	done bool
+}
 
-func (w testWriter) Write(p []byte) (int, error) {
-	w.t.Helper()
-	w.t.Log(strings.TrimRight(string(p), "\n"))
+// newTestWriter registers its cleanup first, so it runs last: shutdown logs
+// from later cleanups (servers, the app) are still reported.
+func newTestWriter(t testing.TB) *testWriter {
+	w := &testWriter{t: t}
+	t.Cleanup(func() {
+		w.mu.Lock()
+		w.done = true
+		w.mu.Unlock()
+	})
+	return w
+}
+
+func (w *testWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.done {
+		w.t.Helper()
+		w.t.Log(strings.TrimRight(string(p), "\n"))
+	}
 	return len(p), nil
 }
 
