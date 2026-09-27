@@ -196,6 +196,34 @@ func TestBindingCompileErrors(t *testing.T) {
 	}
 }
 
+type TenantBase struct {
+	torge.Strict
+	Tenant string `query:"tenant" validate:"required"`
+}
+
+type ListInInput struct {
+	TenantBase
+	Q string `query:"q"`
+}
+
+func TestStrictNestedBase(t *testing.T) {
+	app := torgetest.NewApp(t)
+	torge.Get(app, "/list", func(c *torge.Context, in *ListInInput) (*ListInInput, error) {
+		return in, nil
+	})
+	tc := torgetest.New(t, app)
+
+	// The base struct's own parameter must bind, not trip strict mode.
+	tc.GET("/list?tenant=acme&q=x").Do().
+		ExpectStatus(200).
+		ExpectJSONPath("Tenant", "acme").
+		ExpectJSONPath("Q", "x")
+	// Undeclared parameters are still rejected.
+	tc.GET("/list?tenant=acme&bogus=1").Do().
+		ExpectStatus(422).ExpectErrorCode(torge.CodeValidation)
+	tc.GET("/list?q=x").Do().ExpectStatus(422).ExpectErrorCode(torge.CodeValidation)
+}
+
 type StrictBodyOnlyInput struct {
 	torge.Strict
 	Name string `json:"name"`

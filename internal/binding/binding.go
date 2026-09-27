@@ -75,15 +75,22 @@ type Strict struct{}
 // nanosecond, with no cache.
 func (Strict) StrictBinding() {}
 
-// strictMarker matches the Strict marker (and any type embedding it,
-// through promotion).
-type strictMarker interface{ StrictBinding() }
+var strictType = reflect.TypeFor[Strict]()
 
-var strictMarkerType = reflect.TypeFor[strictMarker]()
-
-// isStrictMarker reports whether sf is an embedded Strict marker.
+// isStrictMarker reports whether sf is the embedded Strict marker itself.
+// It deliberately matches only the marker type, not structs that merely
+// contain it: those must still be recursed into so their own parameter
+// fields are collected. (The public strictBody check uses a type
+// assertion instead, where promotion is exactly the desired behavior.)
 func isStrictMarker(sf reflect.StructField) bool {
-	return sf.Anonymous && sf.Type.Implements(strictMarkerType)
+	if !sf.Anonymous {
+		return false
+	}
+	t := sf.Type
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t == strictType
 }
 
 // Source provides raw request values.
