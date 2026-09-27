@@ -69,19 +69,21 @@ type Plan struct {
 // torge.Strict, which carries the public documentation.
 type Strict struct{}
 
-var strictType = reflect.TypeFor[Strict]()
+// StrictBinding marks the type as a strict-binding input. The method is
+// promoted to any struct embedding Strict, so both the public check and
+// the plan compiler below detect it with a type assertion — about a
+// nanosecond, with no cache.
+func (Strict) StrictBinding() {}
 
-// isStrictMarker reports whether sf is an embedded Strict marker (by value
-// or pointer).
+// strictMarker matches the Strict marker (and any type embedding it,
+// through promotion).
+type strictMarker interface{ StrictBinding() }
+
+var strictMarkerType = reflect.TypeFor[strictMarker]()
+
+// isStrictMarker reports whether sf is an embedded Strict marker.
 func isStrictMarker(sf reflect.StructField) bool {
-	if !sf.Anonymous {
-		return false
-	}
-	t := sf.Type
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	return t == strictType
+	return sf.Anonymous && sf.Type.Implements(strictMarkerType)
 }
 
 // Source provides raw request values.

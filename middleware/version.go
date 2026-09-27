@@ -71,24 +71,9 @@ func APIVersion(allowed ...string) torge.Middleware {
 			}
 			c.Set(apiVersionKey{}, v)
 			c.Header("API-Version", v)
-			addVary(c, "Accept-Version")
+			c.AddVary("Accept-Version")
 			return next(c)
 		}
-	}
-}
-
-// addVary appends value to the Vary response header without duplicating it.
-func addVary(c *torge.Context, value string) {
-	h := c.Response().Header()
-	for v := range strings.SplitSeq(h.Get("Vary"), ",") {
-		if strings.EqualFold(strings.TrimSpace(v), value) {
-			return
-		}
-	}
-	if h.Get("Vary") == "" {
-		h.Set("Vary", value)
-	} else {
-		h.Set("Vary", h.Get("Vary")+", "+value)
 	}
 }
 

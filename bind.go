@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/TosmimForidMehtab/torge/internal/binding"
 	"github.com/TosmimForidMehtab/torge/validate"
@@ -102,29 +101,15 @@ func (s queryValuesSource) CookieValue(string) (string, bool) {
 	return "", false
 }
 
-// strictBodyCache remembers per input type whether strict bodies apply, so
-// BindJSON pays no reflection or plan lookup on the hot path after the
-// first call for a type.
-var strictBodyCache sync.Map // reflect.Type -> bool
-
-// strictBody reports whether dst's binding plan requires strict bodies. It
-// stays off the hot path: custom serializers ignore strictness, and the
-// answer is cached per type.
+// strictBody reports whether dst requires strict bodies. It stays off the
+// hot path: custom serializers ignore strictness, and the marker check is
+// a single type assertion on the promoted StrictBinding method.
 func (c *Context) strictBody(dst any) bool {
 	if _, ok := c.serializer().(JSONSerializer); !ok {
 		return false
 	}
-	t := reflect.TypeOf(dst)
-	if t == nil || t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
-		return false
-	}
-	if v, ok := strictBodyCache.Load(t); ok {
-		return v.(bool)
-	}
-	plan, err := binding.PlanFor(t.Elem())
-	strict := err == nil && plan.StrictBody
-	strictBodyCache.Store(t, strict)
-	return strict
+	_, ok := dst.(interface{ StrictBinding() })
+	return ok
 }
 
 // Validate validates v with the application's validator, converting failures

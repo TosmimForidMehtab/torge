@@ -283,6 +283,55 @@ func TestTopicsFreedAfterUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestPublishWithoutReplayCreatesNoTopics(t *testing.T) {
+	h := realtime.NewHub(realtime.WithReplayBufferSize(0))
+	defer h.Close()
+	for i := range 1000 {
+		h.Publish(fmt.Sprintf("t:%d", i), realtime.Event{Data: i})
+	}
+	if n := h.TopicCount(); n != 0 {
+		t.Fatalf("topics retained = %d, want 0", n)
+	}
+	// Delivery still works once subscribed.
+	ch, unsubscribe := h.Subscribe("live", "")
+	defer unsubscribe()
+	h.Publish("live", realtime.Event{Data: "hi"})
+	if e := recv(t, ch); e.Data != "hi" {
+		t.Fatalf("data = %v, want hi", e.Data)
+	}
+}
+
+func TestMaxTopicsEvictsLRU(t *testing.T) {
+	h := realtime.NewHub(realtime.WithReplayBufferSize(4), realtime.WithMaxTopics(2))
+	defer h.Close()
+	h.Publish("a", realtime.Event{Data: "a1"})
+	h.Publish("b", realtime.Event{Data: "b1"})
+	// Touch b so a is the least recently used.
+	chb, unsubb := h.Subscribe("b", "0")
+	defer unsubb()
+	if e := recv(t, chb); e.Data != "b1" {
+		t.Fatalf("data = %v, want b1", e.Data)
+	}
+	h.Publish("c", realtime.Event{Data: "c1"})
+	if n := h.TopicCount(); n != 2 {
+		t.Fatalf("topics retained = %d, want 2", n)
+	}
+	// a was evicted: subscribing finds nothing to replay.
+	cha, unsuba := h.Subscribe("a", "0")
+	defer unsuba()
+	select {
+	case e := <-cha:
+		t.Fatalf("evicted topic replayed %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	// b was retained with its buffer.
+	chb2, unsubb2 := h.Subscribe("b", "0")
+	defer unsubb2()
+	if e := recv(t, chb2); e.Data != "b1" {
+		t.Fatalf("retained data = %v, want b1", e.Data)
+	}
+}
+
 func TestTopicRetainedForReplay(t *testing.T) {
 	h := realtime.NewHub()
 	defer h.Close()

@@ -159,7 +159,8 @@ func TestFormat(t *testing.T) {
 	tc.GET("/user").Do().
 		ExpectStatus(200).ExpectJSONPath("name", "Ada")
 	tc.GET("/user").Header("Accept", "text/csv").Do().
-		ExpectStatus(406).ExpectErrorCode(torge.CodeNotAcceptable)
+		ExpectStatus(406).ExpectErrorCode(torge.CodeNotAcceptable).
+		ExpectHeader("Vary", "Accept")
 	tc.GET("/user").Do().
 		ExpectStatus(200).ExpectHeaderPresent("Vary")
 }

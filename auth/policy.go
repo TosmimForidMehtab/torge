@@ -25,8 +25,16 @@ type Policy func(c *torge.Context, p torge.Principal) error
 // FORBIDDEN with CodeForbidden, matching RequireRoles/RequireScopes.
 var errPolicyDenied = errors.New("policy denied")
 
-// errNotOwner backs the ownership helpers.
+// errNotOwner backs genuine ownership mismatches. It counts as an explicit
+// denial for Not: negating "owned by X" legitimately allows "not owned
+// by X".
 var errNotOwner = errors.New("not the resource owner")
+
+// errOwnerUnavailable backs ownership checks that cannot run: nil
+// extractors or principal, or empty values on either side. It is
+// deliberately not an explicit denial, so Not passes it through and the
+// request fails closed instead of turning a misconfiguration into access.
+var errOwnerUnavailable = errors.New("resource owner cannot be determined")
 
 // All returns a Policy that allows only when every policy allows. The
 // first denial wins and is returned; an empty All allows.
@@ -139,10 +147,13 @@ func isDenial(err error) bool {
 func OwnerIs(subject func(*torge.Context) string, owner func(torge.Principal) string) Policy {
 	return func(c *torge.Context, p torge.Principal) error {
 		if subject == nil || owner == nil || p == nil {
-			return errNotOwner
+			return errOwnerUnavailable
 		}
 		s, o := subject(c), owner(p)
-		if s == "" || o == "" || s != o {
+		if s == "" || o == "" {
+			return errOwnerUnavailable
+		}
+		if s != o {
 			return errNotOwner
 		}
 		return nil

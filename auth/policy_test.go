@@ -123,6 +123,27 @@ func TestNot(t *testing.T) {
 	}
 }
 
+func TestNotOwnerIsFailsClosed(t *testing.T) {
+	// A misspelled parameter yields an empty subject: unavailable, not a
+	// denial, so negation must still deny.
+	missing := auth.OwnerIs(
+		func(_ *torge.Context) string { return "" },
+		func(p torge.Principal) string { return p.ID() },
+	)
+	owner := &auth.User{Subject: "u1"}
+	if err := auth.Not(missing)(nil, owner); err == nil {
+		t.Fatal("Not(OwnerIs(missing param)) must deny, got nil")
+	}
+	// A genuine mismatch is a denial, so negation allows.
+	mismatch := auth.OwnerIs(
+		func(_ *torge.Context) string { return "u2" },
+		func(p torge.Principal) string { return p.ID() },
+	)
+	if err := auth.Not(mismatch)(nil, owner); err != nil {
+		t.Fatalf("Not(OwnerIs(mismatch)) = %v, want nil", err)
+	}
+}
+
 func TestOwnerIs(t *testing.T) {
 	owner := &auth.User{Subject: "u1"}
 	subject := func(id string) func(*torge.Context) string {

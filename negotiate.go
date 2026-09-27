@@ -122,10 +122,12 @@ func (c *Context) Format(offers ...Offer) error {
 	if strings.TrimSpace(header) != "" {
 		best = negotiateContentType(header, expandOfferNames(names))
 	}
+	// Vary is set on every path, including 406, so a cache never serves
+	// one client's negotiation to another.
+	c.AddVary("Accept")
 	if best < 0 {
 		return NotAcceptable(CodeNotAcceptable, "None of the offered media types match the Accept header; available: "+strings.Join(names, ", "))
 	}
-	addVary(c, "Accept")
 	return offers[best].Handle(c)
 }
 
@@ -227,8 +229,10 @@ func expandOfferNames(names []string) []string {
 	return expanded
 }
 
-// addVary appends value to the Vary response header without duplicating it.
-func addVary(c *Context, value string) {
+// AddVary appends value to the Vary response header without duplicating
+// it, so caches key on the negotiated dimension. Must be called before
+// the response is written.
+func (c *Context) AddVary(value string) {
 	for _, v := range c.Response().Header().Values("Vary") {
 		for part := range strings.SplitSeq(v, ",") {
 			if strings.EqualFold(strings.TrimSpace(part), value) {

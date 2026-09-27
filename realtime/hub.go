@@ -72,7 +72,8 @@ type Event struct {
 type HubOption func(*hubConfig)
 
 type hubConfig struct {
-	replay int
+	replay    int
+	maxTopics int
 }
 
 // WithReplayBufferSize sets how many recent events per topic are kept for
@@ -88,6 +89,24 @@ func WithReplayBufferSize(size int) HubOption {
 			size = 0
 		}
 		c.replay = size
+	}
+}
+
+// WithMaxTopics caps how many topics the Hub retains. When a new topic
+// would exceed the cap, the least-recently-used topic without subscribers
+// is evicted; topics with subscribers are never evicted. A non-positive
+// size leaves the Hub unbounded. Set it whenever publish topics derive
+// from user input, so clients cannot grow server memory without bound.
+//
+// Example:
+//
+//	hub := realtime.NewHub(realtime.WithMaxTopics(1024))
+func WithMaxTopics(n int) HubOption {
+	return func(c *hubConfig) {
+		if n < 0 {
+			n = 0
+		}
+		c.maxTopics = n
 	}
 }
 
@@ -117,6 +136,10 @@ type Hub struct {
 	mu     sync.Mutex
 	topics map[string]*hubTopic
 	replay int
+	// maxTopics caps retained topics; <= 0 means unbounded.
+	maxTopics int
+	// useSeq orders topic use for LRU eviction.
+	useSeq uint64
 	closed bool
 }
 
@@ -127,6 +150,8 @@ type hubTopic struct {
 	buf   []Event
 	start int
 	subs  map[*hubSubscriber]struct{}
+	// lastUse orders the topic for LRU eviction of subscriber-less topics.
+	lastUse uint64
 }
 
 type hubSubscriber struct {
@@ -148,7 +173,7 @@ func NewHub(opts ...HubOption) *Hub {
 			opt(&cfg)
 		}
 	}
-	return &Hub{topics: make(map[string]*hubTopic), replay: cfg.replay}
+	return &Hub{topics: make(map[string]*hubTopic), replay: cfg.replay, maxTopics: cfg.maxTopics}
 }
 
 // Publish delivers e to every subscriber of topic and records it in the
@@ -157,6 +182,9 @@ func NewHub(opts ...HubOption) *Hub {
 // when custom IDs are used. Publish never blocks: a subscriber whose
 // buffer is full is disconnected (see Hub) while every other subscriber
 // still receives the event. Publishing to a closed Hub is a no-op.
+//
+// Each new topic retains a replay buffer, so keep topic names
+// server-controlled or cap retention with WithMaxTopics.
 //
 // Example:
 //
@@ -167,7 +195,19 @@ func (h *Hub) Publish(topic string, e Event) {
 	if h.closed {
 		return
 	}
-	t := h.topicLocked(topic)
+	var t *hubTopic
+	if h.replay == 0 {
+		// Without replay there is nothing to retain: look the topic up
+		// without creating it, so publishes to unsubscribed topics leave
+		// no trace in the map.
+		var ok bool
+		t, ok = h.topics[topic]
+		if !ok {
+			return
+		}
+	} else {
+		t = h.topicLocked(topic)
+	}
 	t.next++
 	if e.ID == "" {
 		e.ID = strconv.FormatUint(t.next, 10)
@@ -313,10 +353,40 @@ func (h *Hub) Serve(c *torge.Context, topic string) error {
 func (h *Hub) topicLocked(topic string) *hubTopic {
 	t, ok := h.topics[topic]
 	if !ok {
+		h.evictLocked()
 		t = &hubTopic{subs: make(map[*hubSubscriber]struct{})}
 		h.topics[topic] = t
 	}
+	h.touchLocked(t)
 	return t
+}
+
+// touchLocked marks t as most recently used for LRU eviction. Callers hold
+// h.mu.
+func (h *Hub) touchLocked(t *hubTopic) {
+	t.lastUse = h.useSeq
+	h.useSeq++
+}
+
+// evictLocked deletes the least-recently-used topic without subscribers
+// when the Hub is at its topic cap. Topics with subscribers are never
+// evicted. Callers hold h.mu.
+func (h *Hub) evictLocked() {
+	if h.maxTopics <= 0 || len(h.topics) < h.maxTopics {
+		return
+	}
+	victim, oldest, found := "", uint64(0), false
+	for name, t := range h.topics {
+		if len(t.subs) > 0 {
+			continue
+		}
+		if !found || t.lastUse < oldest {
+			victim, oldest, found = name, t.lastUse, true
+		}
+	}
+	if found {
+		delete(h.topics, victim)
+	}
 }
 
 func (h *Hub) removeSub(topic string, sub *hubSubscriber) {

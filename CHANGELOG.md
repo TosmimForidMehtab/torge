@@ -18,11 +18,11 @@ entries are marked with their module.
   `Search`, and RFC 8288 `Context.SetPageLinks` (preserves request query).
   Binding, validation and OpenAPI derive from the same structs.
 - Request/response helpers: `Send` (type-dispatched responses),
-  `Format` (ordered `Offer`s, first is the default, `Vary: Accept`),
-  `Accepts`/`Is` (RFC 9110 matching: case-insensitive, q=0 excludes,
-  fixed shorthand table), `Location`, `Links`, `Type`, `ClearCookie`,
-  `Hostname`, `Secure`, `XHR`, plus the `NOT_ACCEPTABLE` error code and
-  `NotAcceptable` constructor.
+  `Format` (ordered `Offer`s, first is the default, `Vary: Accept`
+  including on 406), `Accepts`/`Is` (RFC 9110 matching: case-insensitive,
+  q=0 excludes, fixed shorthand table), `Context.AddVary`, `Location`,
+  `Links`, `Type`, `ClearCookie`, `Hostname`, `Secure`, `XHR`, plus the
+  `NOT_ACCEPTABLE` error code and `NotAcceptable` constructor.
 - Success and error contracts: `Result[T]` envelope (`NewResult`, `WithMeta`)
   and opt-in RFC 9457 problem details (`ProblemBody`, `NewProblem`,
   `ProblemErrorHandler` via `WithErrorHandler`); the default error envelope
@@ -44,8 +44,8 @@ entries are marked with their module.
   and `RouteInfo.Deprecated`.
 - Realtime: `realtime.Hub` topic broadcast with ring-buffer replay,
   Last-Event-ID resume, non-blocking publish (slow subscribers are
-  disconnected to replay on reconnect), idle topic reclamation and a
-  `Serve` bridge to SSE.
+  disconnected to replay on reconnect), idle topic reclamation,
+  `WithMaxTopics` LRU bound and a `Serve` bridge to SSE.
 - Auth: composable `auth.Policy` (`All`, `Any`, fail-closed `Not` that
   inverts only explicit 403 denials) plus empty-safe
   `OwnerIs`/`RequireOwnerID`, wired through `auth.Require`.
