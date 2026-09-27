@@ -53,6 +53,22 @@ func (g *Group) Use(mws ...Middleware) {
 	}
 }
 
+// Version creates a versioned API subgroup with prefix "/api/<version>" and
+// an OpenAPI tag for the version, for example:
+//
+//	v1 := app.Version("v1")
+//	v2 := app.Version("v2")
+//	legacy := app.Version("v0", torge.Sunset("Mon, 01 Jun 2026 00:00:00 GMT"))
+//
+// Pair it with middleware.APIVersion when clients negotiate versions with an
+// Accept-Version header, or branch on media types with Context.Format. For a
+// different prefix scheme, use Group directly.
+func (g *Group) Version(version string, opts ...RouteOption) *Group {
+	v := strings.Trim(version, "/")
+	all := append([]RouteOption{Tags(v)}, opts...)
+	return g.Group("/api/"+v, all...)
+}
+
 // Group creates a subgroup. Options (including middleware) apply to all routes
 // of the subgroup.
 func (g *Group) Group(prefix string, opts ...RouteOption) *Group {

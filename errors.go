@@ -2,6 +2,7 @@ package torge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -111,6 +112,7 @@ const (
 	CodeForbidden            = "FORBIDDEN"
 	CodeNotFound             = "NOT_FOUND"
 	CodeMethodNotAllowed     = "METHOD_NOT_ALLOWED"
+	CodeNotAcceptable        = "NOT_ACCEPTABLE"
 	CodeConflict             = "CONFLICT"
 	CodePayloadTooLarge      = "PAYLOAD_TOO_LARGE"
 	CodeUnsupportedMedia     = "UNSUPPORTED_MEDIA_TYPE"
@@ -144,6 +146,11 @@ func Forbidden(code, message string) *Error { return NewError(http.StatusForbidd
 
 // NotFound returns a 404 error.
 func NotFound(code, message string) *Error { return NewError(http.StatusNotFound, code, message) }
+
+// NotAcceptable returns a 406 error.
+func NotAcceptable(code, message string) *Error {
+	return NewError(http.StatusNotAcceptable, code, message)
+}
 
 // Conflict returns a 409 error.
 func Conflict(code, message string) *Error { return NewError(http.StatusConflict, code, message) }
@@ -239,6 +246,68 @@ type ErrorPayload struct {
 type ErrorDebug struct {
 	Error string         `json:"error,omitempty"`
 	Meta  map[string]any `json:"meta,omitempty"`
+}
+
+// ProblemBody is an RFC 9457 problem-details error document.
+//
+// ProblemErrorHandler writes errors in this shape with Content-Type
+// application/problem+json. Type stays "about:blank" per the RFC; the stable
+// Torge code travels in the Code extension member so clients can match on it
+// exactly like the default envelope.
+type ProblemBody struct {
+	Type      string      `json:"type"`
+	Title     string      `json:"title"`
+	Status    int         `json:"status"`
+	Detail    string      `json:"detail,omitempty"`
+	Instance  string      `json:"instance,omitempty"`
+	Code      string      `json:"code,omitempty"`
+	RequestID string      `json:"request_id,omitempty"`
+	Details   any         `json:"details,omitempty"`
+	Debug     *ErrorDebug `json:"debug,omitempty"`
+}
+
+// NewProblem converts e to problem details for the request path. Title is
+// the short, stable status summary; the occurrence-specific message goes
+// in Detail.
+func NewProblem(e *Error, instance, requestID string) ProblemBody {
+	p := ProblemBody{
+		Type:      "about:blank",
+		Title:     firstNonEmpty(http.StatusText(e.Status), e.Code),
+		Status:    e.Status,
+		Detail:    e.Message,
+		Code:      e.Code,
+		RequestID: requestID,
+		Details:   e.Details,
+	}
+	if instance != "" {
+		p.Instance = instance
+	}
+	return p
+}
+
+// ProblemErrorHandler renders errors as RFC 9457 problem details. Install it
+// with WithErrorHandler; the default envelope is unchanged:
+//
+//	app := torge.New(torge.WithErrorHandler(torge.ProblemErrorHandler))
+func ProblemErrorHandler(c *Context, err error) {
+	e := AsError(err)
+	p := NewProblem(e, c.Path(), c.RequestID())
+	if c.app != nil && c.app.opts.ExposeErrors {
+		dbg := &ErrorDebug{Meta: e.Meta}
+		if e.Err != nil {
+			dbg.Error = e.Err.Error()
+		}
+		if dbg.Error != "" || len(dbg.Meta) > 0 {
+			p.Debug = dbg
+		}
+	}
+	buf, merr := json.Marshal(p)
+	if merr != nil {
+		DefaultErrorHandler(c, err)
+		return
+	}
+	// Headers set earlier (Allow, WWW-Authenticate, Retry-After) are kept.
+	_ = c.Bytes(e.Status, "application/problem+json", buf)
 }
 
 // ErrorHandler renders an error returned by the handler chain. It is called at

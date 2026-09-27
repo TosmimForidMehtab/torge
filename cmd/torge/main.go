@@ -5,7 +5,7 @@
 //	torge generate module users         add a module skeleton
 //	torge generate resource users       add a CRUD resource with tests
 //	torge generate middleware auth      add a middleware skeleton
-//	torge routes [package]              print the route table
+//	torge routes [package] [-json] [--check golden.json]   print the route table
 //	torge doctor                        check the project and toolchain
 //	torge version                       print the CLI version
 //
@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -47,7 +48,7 @@ Usage:
   torge generate module <name>                   add a module skeleton
   torge generate resource <name>                 add a CRUD resource with tests
   torge generate middleware <name>               add a middleware skeleton
-  torge routes [package] [-json]                 print the route table
+  torge routes [package] [-json] [--check golden.json]   print the route table
   torge doctor                                   check the project and toolchain
   torge version                                  print the CLI version
 
@@ -106,6 +107,7 @@ func runPlugin(args []string, stdout, stderr io.Writer) error {
 func cmdRoutes(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("routes", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
+	checkPath := fs.String("check", "", "compare route output against `golden.json` and exit non-zero on drift")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -113,17 +115,98 @@ func cmdRoutes(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() > 0 {
 		pkg = fs.Arg(0)
 	}
+	checking := *checkPath != ""
+	if checking {
+		// Fail fast on a missing golden file: it is an error, not a
+		// match, and this keeps the check hermetic without running the app.
+		if _, err := os.Stat(*checkPath); err != nil {
+			return fmt.Errorf("routes --check: %w", err)
+		}
+	}
 	mode := "1"
-	if *asJSON {
+	if *asJSON || checking {
+		// --check always compares the JSON table so the gate is
+		// independent of the human-readable format.
 		mode = "json"
 	}
 	cmd := exec.Command("go", "run", pkg)
 	cmd.Env = append(os.Environ(), "TORGE_ROUTES="+mode)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.Stderr = stderr
+	var captured bytes.Buffer
+	if checking {
+		cmd.Stdout = &captured
+	} else {
+		cmd.Stdout = stdout
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go run %s: %w (the app must call app.Listen or app.Serve)", pkg, err)
 	}
+	if checking {
+		if err := compareRouteOutput(captured.Bytes(), *checkPath); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// normalizeRouteOutput trims trailing whitespace per line and drops trailing
+// blank lines, so goldens are insensitive to a final newline.
+func normalizeRouteOutput(b []byte) string {
+	s := strings.ReplaceAll(string(b), "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// compareRouteOutput compares app output against the golden file at
+// goldenPath after normalization. A missing golden file is an error, and a
+// mismatch reports the first differing lines.
+func compareRouteOutput(got []byte, goldenPath string) error {
+	wantBytes, err := os.ReadFile(goldenPath)
+	if err != nil {
+		return fmt.Errorf("routes --check: read golden file: %w", err)
+	}
+	want, have := normalizeRouteOutput(wantBytes), normalizeRouteOutput(got)
+	if want == have {
+		return nil
+	}
+	const maxLines = 10
+	wlines := strings.Split(want, "\n")
+	hlines := strings.Split(have, "\n")
+	n := len(wlines)
+	if len(hlines) > n {
+		n = len(hlines)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "routes drift: output differs from golden %q (golden %d lines, got %d lines)", goldenPath, len(wlines), len(hlines))
+	shown, more := 0, 0
+	for i := 0; i < n; i++ {
+		var w, h string
+		if i < len(wlines) {
+			w = wlines[i]
+		}
+		if i < len(hlines) {
+			h = hlines[i]
+		}
+		if w == h {
+			continue
+		}
+		if shown < maxLines {
+			fmt.Fprintf(&b, "\nline %d:\n- %s\n+ %s", i+1, w, h)
+			shown++
+		} else {
+			more++
+		}
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, "\n... and %d more differing lines", more)
+	}
+	return errors.New(b.String())
 }
 
 // identifier converts a user-supplied name to a Go identifier fragment.

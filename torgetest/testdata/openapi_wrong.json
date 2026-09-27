@@ -1,0 +1,8 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Deliberately wrong golden for TestAssertOpenAPIGolden/mismatch_detected",
+    "version": "0.0.0"
+  },
+  "paths": {}
+}
