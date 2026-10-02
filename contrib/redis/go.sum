@@ -1,5 +1,5 @@
-github.com/TosmimForidMehtab/torge v0.2.0 h1:Y7oIyJuzDVoR2lsxZiIt6uhlFCNWLIYSLjvP9qhSK6k=
-github.com/TosmimForidMehtab/torge v0.2.0/go.mod h1:oeriFfJDWZLWsEsQVAb8zexc8HZahd5R646gDj2pMkA=
+github.com/TosmimForidMehtab/torge v0.3.0 h1:H6v6B22tD2VPkRmW/B1SuoVeI8ATBX9Nyo/R3nJAXUE=
+github.com/TosmimForidMehtab/torge v0.3.0/go.mod h1:oeriFfJDWZLWsEsQVAb8zexc8HZahd5R646gDj2pMkA=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
