@@ -34,8 +34,8 @@ github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnr
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
-github.com/labstack/echo/v4 v4.15.4 h1:DL45vVYa+BWE+XuW+zZNd9H0YEdZ80UAWJGcTVW4EVs=
-github.com/labstack/echo/v4 v4.15.4/go.mod h1:CuMetKIRwsuO/qlAgMq+KTAalwGoB/h4tC+yPdrTj1g=
+github.com/labstack/echo/v4 v4.16.0 h1:cFqqpqVNmSVyn4nvsXHp5rU4aVLYG3hx4fGWc3FngBk=
+github.com/labstack/echo/v4 v4.16.0/go.mod h1:VHAohjgM63iiTVI6EahEDjtRhQNXCMXFp0TMeIsFuW0=
 github.com/labstack/gommon v0.5.0 h1:6VSQ2NOzsnEJ5W6+84E0RbcaDDmgB6NIAzWCczTEe6c=
 github.com/labstack/gommon v0.5.0/go.mod h1:Rzlg7HHy1maLfzBYGg9NZcVuz1sA68HHhLjhcEllYE0=
 github.com/leodido/go-urn v1.5.0 h1:pLqT2kq1zpHW/1D18QMjMpdtX7cekxqtJJjg5ANyWw0=
@@ -75,8 +75,8 @@ github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6Kllzaw
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/valyala/fasttemplate v1.2.2 h1:lxLXG0uE3Qnshl9QyaK6XJxMXlQZELvChBOCmQD0Loo=
 github.com/valyala/fasttemplate v1.2.2/go.mod h1:KHLXt3tVN2HBp8eijSv/kGJopbvo7S+qRAEEKiv+SiQ=
-go.mongodb.org/mongo-driver/v2 v2.5.0 h1:yXUhImUjjAInNcpTcAlPHiT7bIXhshCTL3jVBkF3xaE=
-go.mongodb.org/mongo-driver/v2 v2.5.0/go.mod h1:yOI9kBsufol30iFsl1slpdq1I0eHPzybRWdyYUs8K/0=
+go.mongodb.org/mongo-driver/v2 v2.9.1 h1:jewiFs2m1/VOQp8qhFshX6hWZ+EAXDhZHXExAUMcOgQ=
+go.mongodb.org/mongo-driver/v2 v2.9.1/go.mod h1:SHKN0IWkKmEVGHLjXnni6s4wPKX4v86FTgOeJJFuXcA=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
 go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
